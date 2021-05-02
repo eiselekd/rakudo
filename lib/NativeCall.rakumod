@@ -132,7 +132,7 @@ sub nativesizeof($obj) is export(:DEFAULT) {
 my constant $signed_ints_by_size =
   nqp::list_s( "", "char", "short", "", "int", "", "", "", "longlong" );
 
-# Gets the NCI type code to use based on a given Perl 6 type.
+# Gets the NCI type code to use based on a given Raku type.
 my constant $type_map = nqp::hash(
   "Bool",       nqp::atpos_s($signed_ints_by_size,nativesizeof(bool)),
   "bool",       nqp::atpos_s($signed_ints_by_size,nativesizeof(bool)),
@@ -275,6 +275,7 @@ our role Native[Routine $r, $libname where Str|Callable|List|IO::Path|Distributi
 
     method !setup() {
         $setup-lock.protect: {
+            nqp::neverrepossess(self);
             return if nqp::unbox_i($!call);
 
             # Make sure that C++ methods are treated as mangled (unless set otherwise)
@@ -480,7 +481,7 @@ our role Native[Routine $r, $libname where Str|Callable|List|IO::Path|Distributi
                     QAST::Op.new(
                         :op<if>,
                         QAST::Op.new(
-                            :op<isconcrete>,
+                            :op<isconcrete_nd>,
                             QAST::Var.new(:scope<local>, :name($lowered_name)),
                         ),
                         QAST::Op.new(
@@ -504,25 +505,19 @@ our role Native[Routine $r, $libname where Str|Callable|List|IO::Path|Distributi
     }
 
     method !compile-function-body(Mu $block) {
-        my $perl6comp := nqp::getcomp("Raku");
-        my @stages = $perl6comp.stages;
-        Nil until @stages.shift eq 'optimize';
+        my $compiler := nqp::getcomp("Raku");
+        my $body := $compiler.compile($block, :from<optimize>);
 
-        my $result := $block;
-        $result := $perl6comp.^can($_)
-            ?? $perl6comp."$_"($result)
-            !! $perl6comp.backend."$_"($result)
-            for @stages;
-        my $body := nqp::compunitmainline($result);
         $*W.add_object($body) if $*W;
 
-        nqp::setcodename($body, $!name);
+        nqp::setcodename(nqp::getattr($body, ForeignCode, '$!do'), $!name);
         $body
     }
 
     method create-optimized-call() {
         unless $!optimized-body {
             $setup-lock.protect: {
+                nqp::neverrepossess(self);
                 unless nqp::defined(nqp::getobjsc(self)) {
                     if $*W {
                         $*W.add_object(self);
@@ -548,13 +543,13 @@ our role Native[Routine $r, $libname where Str|Callable|List|IO::Path|Distributi
                 $jit-optimized-body.code_object(self);
                 nqp::bindattr(self, $?CLASS, '$!jit-optimized-body', $stub);
                 my $fixups := QAST::Stmts.new();
-                my $des := QAST::Stmts.new();
                 if $*W {
                     $*W.add_root_code_ref($stub, $optimized-body);
                     $*W.add_root_code_ref($stub, $jit-optimized-body);
                     $*W.add_object($?CLASS);
                     $*UNIT.push($optimized-body);
                     $*UNIT.push($jit-optimized-body);
+                    $fixups.push(QAST::Op.new(:op<neverrepossess>, QAST::WVal.new(:value(self))));
                     $fixups.push($*W.set_attribute(self, $?CLASS, '$!optimized-body',
                         QAST::BVal.new( :value($optimized-body) )));
                     $fixups.push($*W.set_attribute(self, $?CLASS, '$!jit-optimized-body',
@@ -784,4 +779,4 @@ sub EXPORT(|) {
     );
 }
 
-# vim:ft=perl6
+# vim: expandtab shiftwidth=4

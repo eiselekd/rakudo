@@ -4,24 +4,22 @@ Rakudo::Internals.REGISTER-DYNAMIC: '$*RAKUDO_MODULE_DEBUG', {
             state $level = %*ENV<RAKUDO_MODULE_DEBUG>++;
             my $indent = (($level - 1) * 4) + 1;
             my $str = @str>>.indent(7 + $indent).join("\n").substr(7 + $indent);
-            note sprintf "%2d%sRMD: $str", $level, " " x $indent;
+            note sprintf "%2d%sRMD: %s", $level, " " x $indent, $str;
          }
       !! False
 }
 
 Rakudo::Internals.REGISTER-DYNAMIC: '$*EXECUTABLE', {
     PROCESS::<$EXECUTABLE> := IO::Path.new(:CWD(INIT nqp::cwd()),
+      nqp::execname()
 #?if jvm
-      $*VM.properties<perl6.execname>
-      // $*VM.properties<perl6.prefix> ~ '/bin/perl6-j'
+      || $*VM.properties<perl6.prefix> ~ '/bin/perl6-j'
 #?endif
 #?if moar
-      nqp::execname()
       || ($*VM.config<prefix> ~ '/bin/'
         ~ ($*VM.config<osname> eq 'MSWin32' ?? 'perl6-m.exe' !! 'perl6-m'))
 #?endif
 #?if js
-      nqp::execname()
       // ($*VM.config<prefix> ~ '/bin/'
         ~ ($*VM.config<osname> eq 'MSWin32' ?? 'perl6-js.bat' !! 'perl6-js'))
 #?endif
@@ -79,7 +77,7 @@ Rakudo::Internals.REGISTER-DYNAMIC: '$*HOME', {
 
 {
     sub fetch($what) {
-        once if !Rakudo::Internals.IS-WIN && try { qx/id/ } -> $id {
+        once if !Rakudo::Internals.IS-WIN && try { qx/LC_MESSAGES=POSIX id/ } -> $id {
             if $id ~~ m/^
               [ uid "=" $<uid>=(\d+) ]
               [ "(" $<user>=(<-[ ) ]>+) ")" ]
@@ -104,4 +102,4 @@ Rakudo::Internals.REGISTER-DYNAMIC: '$*HOME', {
     Rakudo::Internals.REGISTER-DYNAMIC: '$*GROUP', { fetch('$GROUP') };
 }
 
-# vim: ft=perl6 expandtab sw=4
+# vim: expandtab shiftwidth=4

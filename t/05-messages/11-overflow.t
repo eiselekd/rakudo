@@ -2,6 +2,8 @@ use lib <t/packages/>;
 use Test;
 use Test::Helpers;
 
+$*VM.name eq 'jvm' and plan :skip-all<These tests do not throw on JVM backend>;
+
 # This file contains tests for behaviour on overflow in various routines
 
 plan 2;
@@ -45,4 +47,4 @@ subtest '.indent' => {
     }
 }
 
-# vim: ft=perl6 expandtab sw=4
+# vim: expandtab shiftwidth=4

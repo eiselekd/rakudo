@@ -192,7 +192,7 @@
         }
     }
     method on-close(Supply:D: &on-close) {
-        return Supply.new(OnClose.new(source => self, :&on-close))
+        Supply.new(OnClose.new(source => self, :&on-close))
     }
 
     my class MapSupply does SimpleOpTappable {
@@ -396,8 +396,11 @@
         }
     }
     method stable(Supply:D: $time, :$scheduler = $*SCHEDULER) {
-        return self unless $time;
-        Supply.new(Stable.new(source => self.sanitize, :$time, :$scheduler))
+        $time
+          ?? Supply.new(
+               Stable.new(source => self.sanitize, :$time, :$scheduler)
+             )
+          !! self
     }
 
     my class Delayed does SimpleOpTappable {
@@ -611,6 +614,7 @@
           ?? supply {
                  my str $str;
                  my str $needle = $the-needle;
+                 my int $len = nqp::chars($needle);
                  whenever self -> str $val {
                      $str = nqp::concat($str,$val);
 
@@ -620,7 +624,7 @@
                        nqp::isgt_i(($i = nqp::index($str,$needle,$pos)),-1),
                        nqp::stmts(
                          emit($the-needle),
-                         ($pos = $i + 1)
+                         ($pos = $i + $len)
                        )
                      );
                      $str = nqp::substr($str,$pos);
@@ -717,4 +721,4 @@
 
 # continued in src/core.c/Supply-coercers.pm6
 
-# vim: ft=perl6 expandtab sw=4
+# vim: expandtab shiftwidth=4

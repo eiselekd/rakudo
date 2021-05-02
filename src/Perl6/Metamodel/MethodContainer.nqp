@@ -27,7 +27,7 @@ role Perl6::Metamodel::MethodContainer {
               ~ $method_type
               ~ " '"
               ~ $name
-              ~ "' (did you mean to declare a multi-method?)");
+              ~ "' (did you mean to declare a multi method?)");
         }
 
         # Add to correct table depending on if it's a Submethod.
@@ -54,7 +54,7 @@ role Perl6::Metamodel::MethodContainer {
 
         # Always need local methods on the list.
         for @!method_order {
-            @meths.push($_)
+            @meths.push(nqp::hllizefor($_,'Raku'))
               unless $check-implementation-detail
                 && nqp::can($_,'is-implementation-detail')
                 && $_.is-implementation-detail;
@@ -64,23 +64,18 @@ role Perl6::Metamodel::MethodContainer {
         unless $local {
             for self.parents($obj, :all($all), :excl($excl)) {
                 for nqp::hllize($_.HOW.method_table($_)) {
-                    @meths.push(nqp::decont($_.value))
+                    @meths.push(nqp::hllizefor(nqp::decont($_.value),'Raku'))
                       unless $check-implementation-detail
                         && nqp::can($_,'is-implementation-detail')
                         && $_.is-implementation-detail;
                 }
                 for nqp::hllize($_.HOW.submethod_table($_)) {
-                    @meths.push(nqp::decont($_.value))
+                    @meths.push(nqp::hllizefor(nqp::decont($_.value),'Raku'))
                       unless $check-implementation-detail
                         && nqp::can($_,'is-implementation-detail')
                         && $_.is-implementation-detail;
                 }
             }
-        }
-
-        # make sure Raku can handle them
-        for @meths {
-            $_ := nqp::hllizefor($_,'Raku');
         }
 
         @meths
@@ -149,3 +144,5 @@ role Perl6::Metamodel::MethodContainer {
         $value
     }
 }
+
+# vim: expandtab sw=4

@@ -143,13 +143,12 @@ class Perl6::Metamodel::WrapDispatcher is Perl6::Metamodel::BaseDispatcher {
 
     method remove($wrapper) {
         my @cands := self.candidates;
-        my $i := 0;
-        while $i < +@cands {
+        my int $i := -1;
+        while ++$i < +@cands {
             if nqp::decont(@cands[$i]) =:= nqp::decont($wrapper) {
                 nqp::splice(@cands, [], $i, 1);
                 return 1;
             }
-            $i := $i + 1;
         }
         return 0;
     }
@@ -176,3 +175,5 @@ class Perl6::Metamodel::WrapDispatcher is Perl6::Metamodel::BaseDispatcher {
         nqp::invokewithcapture($first, $capture);
     }
 }
+
+# vim: expandtab sw=4

@@ -9,14 +9,6 @@
 #include <sys/time.h>
 #endif
 
-#ifndef MVM_spesh_get_and_use_facts
-#define MVM_spesh_get_and_use_facts MVM_spesh_get_facts
-#endif
-
-#ifndef MVM_gc_root_add_permanent_desc
-#define MVM_gc_root_add_permanent_desc(tc, obj_ref, description) MVM_gc_root_add_permanent(tc, obj_ref)
-#endif
-
 #define GET_REG(tc, idx)    (*tc->interp_reg_base)[*((MVMuint16 *)(cur_op + idx))]
 #define REAL_BODY(tc, obj)  MVM_p6opaque_real_data(tc, OBJECT_BODY(obj))
 
@@ -26,7 +18,7 @@ static MVMCallsiteEntry one_str_flags[] = { MVM_CALLSITE_ARG_STR };
 static MVMCallsite     one_str_callsite = { one_str_flags, 1, 1, 1, 0, 0, NULL, NULL };
 
 /* Dispatcher vivify_for callsite. */
-static MVMCallsiteEntry disp_flags[] = { MVM_CALLSITE_ARG_OBJ, MVM_CALLSITE_ARG_OBJ, 
+static MVMCallsiteEntry disp_flags[] = { MVM_CALLSITE_ARG_OBJ, MVM_CALLSITE_ARG_OBJ,
                                          MVM_CALLSITE_ARG_OBJ, MVM_CALLSITE_ARG_OBJ };
 static MVMCallsite     disp_callsite = { disp_flags, 4, 4, 4, 0, 0, NULL, NULL };
 
@@ -172,7 +164,11 @@ static void p6stateinit(MVMThreadContext *tc, MVMuint8 *cur_op) {
 }
 
 /* First FIRST, use a flag in the object header. */
+#ifdef MVM_COLLECTABLE_FLAGS1
+#define RAKUDO_FIRST_FLAG 128
+#else
 #define RAKUDO_FIRST_FLAG 16384
+#endif
 
 static MVMuint8 s_p6setfirstflag[] = {
     MVM_operand_obj | MVM_operand_write_reg,
@@ -181,7 +177,11 @@ static MVMuint8 s_p6setfirstflag[] = {
 static void p6setfirstflag(MVMThreadContext *tc, MVMuint8 *cur_op) {
     MVMObject *code_obj = GET_REG(tc, 2).o;
     MVMObject *vm_code  = MVM_frame_find_invokee(tc, code_obj, NULL);
+#ifdef MVM_COLLECTABLE_FLAGS1
+    vm_code->header.flags1 |= RAKUDO_FIRST_FLAG;
+#else
     vm_code->header.flags |= RAKUDO_FIRST_FLAG;
+#endif
     GET_REG(tc, 0).o = code_obj;
 }
 
@@ -190,8 +190,13 @@ static MVMuint8 s_p6takefirstflag[] = {
 };
 static void p6takefirstflag(MVMThreadContext *tc, MVMuint8 *cur_op) {
     MVMObject *vm_code = tc->cur_frame->code_ref;
+#ifdef MVM_COLLECTABLE_FLAGS1
+    if (vm_code->header.flags1 & RAKUDO_FIRST_FLAG) {
+        vm_code->header.flags1 ^= RAKUDO_FIRST_FLAG;
+#else
     if (vm_code->header.flags & RAKUDO_FIRST_FLAG) {
         vm_code->header.flags ^= RAKUDO_FIRST_FLAG;
+#endif
         GET_REG(tc, 0).i64 = 1;
     }
     else {

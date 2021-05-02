@@ -18,7 +18,7 @@ sub pod2text($pod) is export {
         when Pod::Block::Para       { twrap( $pod.contents.map({pod2text($_)}).join("") ) }
         when Pod::Block::Table      { table2text($pod)               }
         when Pod::Block::Declarator { declarator2text($pod)          }
-        when Pod::Item              { item2text($pod).indent(2)      }
+        when Pod::Item              { item2text($pod)                }
         when Pod::Defn              { pod2text($pod.contents[0]) ~ "\n"
                                       ~ pod2text($pod.contents[1..*-1]) }
 
@@ -43,7 +43,7 @@ sub code2text($pod) {
 }
 
 sub item2text($pod) {
-    '* ' ~ pod2text($pod.contents).chomp.chomp
+    ('* ' ~ pod2text($pod.contents).chomp.chomp).indent(2 * $pod.level)
 }
 
 sub named2text($pod) {
@@ -92,6 +92,9 @@ sub declarator2text($pod) {
         }
         when Sub {
             'sub ' ~ $_.name ~ signature2text($_.signature.params, $_.returns)
+        }
+        when Attribute {
+            'attribute ' ~ $_.gist
         }
         when .HOW ~~ Metamodel::EnumHOW {
             "enum $_.raku() { signature2text $_.enums.pairs } \n"
@@ -158,4 +161,4 @@ sub twrap($text is copy, :$wrap=75 ) {
     $text
 }
 
-# vim: ft=perl6
+# vim: expandtab shiftwidth=4

@@ -1,4 +1,3 @@
-my class X::Cannot::Lazy             { ... }
 my class X::Constructor::Positional  { ... }
 my class X::Method::NotFound         { ... }
 my class X::Method::InvalidQualifier { ... }
@@ -18,11 +17,17 @@ my class Mu { # declared in BOOTSTRAP
     method perlseen(Mu \SELF: |c) { SELF.rakuseen(|c) }
 
     proto method ACCEPTS(|) {*}
-    multi method ACCEPTS(Mu:U: Any \topic) {
+    multi method ACCEPTS(Mu:U: Mu \topic) {
         nqp::hllbool(nqp::istype(topic, self))
     }
-    multi method ACCEPTS(Mu:U: Mu:U \topic) {
-        nqp::hllbool(nqp::istype(topic, self))
+    # Typically, junctions shouldn't be typechecked literally. There are
+    # exceptions though, such as Junction in particular, so this probably
+    # shouldn't be handled by the compiler itself. Having a default ACCEPTS
+    # candidate to handle junctions allows them to get threaded as they should
+    # while preserving compatibility with existing code that has any ACCEPTS
+    # candidates for Mu or Junction.
+    multi method ACCEPTS(Mu:U \SELF: Junction:D \topic) is default {
+        topic.THREAD: { SELF.ACCEPTS: $_ }
     }
 
     method WHERE() {
@@ -77,8 +82,7 @@ my class Mu { # declared in BOOTSTRAP
 
         my role Suggestion[$name] {
             method gist {
-                "No documentation available for type '$name'.
-Perhaps it can be found at https://docs.raku.org/type/$name"
+                "No documentation available for type '$name'. Perhaps it can be found at https://docs.raku.org/type/$name".naive-word-wrapper
             }
         }
 
@@ -109,14 +113,10 @@ Perhaps it can be found at https://docs.raku.org/type/$name"
 
     proto method new(|) {*}
     multi method new(*%attrinit) {
-        nqp::if(
-          nqp::eqaddr(
-            (my $bless := nqp::findmethod(self,'bless')),
-            nqp::findmethod(Mu,'bless')
-          ),
-          nqp::create(self).BUILDALL(Empty, %attrinit),
-          $bless(self,|%attrinit)
-        )
+        nqp::eqaddr((my $bless := nqp::findmethod(self,'bless')),
+                    nqp::findmethod(Mu,'bless'))
+                ?? nqp::create(self).BUILDALL(Empty, %attrinit)
+                !! $bless(self,|%attrinit)
     }
     multi method new($, *@) {
         X::Constructor::Positional.new(:type( self )).throw();
@@ -654,11 +654,9 @@ Perhaps it can be found at https://docs.raku.org/type/$name"
         ''
     }
     multi method Str(Mu:D:) {
-        nqp::if(
-          nqp::eqaddr(self,IterationEnd),
-          "IterationEnd",
-          self.^name ~ '<' ~ nqp::tostr_I(nqp::objectid(self)) ~ '>'
-        )
+        nqp::eqaddr(self,IterationEnd)
+          ?? "IterationEnd"
+          !! self.^name ~ '<' ~ nqp::tostr_I(nqp::objectid(self)) ~ '>'
     }
 
     proto method Stringy(|) {*}
@@ -678,8 +676,9 @@ Perhaps it can be found at https://docs.raku.org/type/$name"
     # Handle the typical "foo.say"
     multi method say() {
 
-        # no own print method, so use $*OUT.print
-        if nqp::eqaddr(self.^find_method("print").package,Mu) {
+        my $method := self.^find_method("print");
+        if nqp::not_i(nqp::istype($method,Mu))  # an NQP routine
+          || nqp::eqaddr($method.package,Mu) {  # no own print method, use $*OUT
             $_ := $*OUT;
             .print(nqp::concat(self.gist,.nl-out))
         }
@@ -706,8 +705,9 @@ Perhaps it can be found at https://docs.raku.org/type/$name"
     # Handle the typical "foo.put"
     multi method put() {
 
-        # no own print method, so use $*OUT.print
-        if nqp::eqaddr(self.^find_method("print").package,Mu) {
+        my $method := self.^find_method("print");
+        if nqp::not_i(nqp::istype($method,Mu))  # an NQP routine
+          || nqp::eqaddr($method.package,Mu) {  # no own print method, use $*OUT
             $_ := $*OUT;
             .print(nqp::concat(self.Str,.nl-out))
         }
@@ -734,8 +734,9 @@ Perhaps it can be found at https://docs.raku.org/type/$name"
     # Handle the typical "foo.note"
     multi method note() {
 
-        # no own print method, so use $*ERR.print
-        if nqp::eqaddr(self.^find_method("print").package,Mu) {
+        my $method := self.^find_method("print");
+        if nqp::not_i(nqp::istype($method,Mu))  # an NQP routine
+          || nqp::eqaddr($method.package,Mu) {  # no own print method, use $*ERR
             $_ := $*ERR;
             .print(nqp::concat(self.gist,.nl-out))
         }
@@ -779,7 +780,7 @@ Perhaps it can be found at https://docs.raku.org/type/$name"
     multi method gist(Mu:U:) { '(' ~ self.^shortname ~ ')' }
     multi method gist(Mu:D:) { self.raku }
 
-    method rakuseen(Mu:D \SELF: $id, $perl, *%named) {
+    method rakuseen(Mu:D \SELF: $id, $raku, *%named) {
         my $sigil = nqp::iseq_s($id, 'Array') ?? '@'
             !! nqp::iseq_s($id, 'Hash') ?? '%' !! '\\';
         if nqp::not_i(nqp::isnull(nqp::getlexdyn('$*rakuseen'))) {
@@ -791,7 +792,7 @@ Perhaps it can be found at https://docs.raku.org/type/$name"
             }
             else {
                 nqp::bindkey(sems,$WHICH,1);
-                my $result := $perl(|%named);
+                my $result := $raku(|%named);
                 my int $value = nqp::atkey(sems,$WHICH);
                 nqp::deletekey(sems,$WHICH);
                 $value == 2
@@ -803,7 +804,7 @@ Perhaps it can be found at https://docs.raku.org/type/$name"
         }
         else {
             my $*rakuseen := nqp::hash("TOP",1);
-            SELF.rakuseen($id,$perl,|%named)
+            SELF.rakuseen($id,$raku,|%named)
         }
     }
 
@@ -1025,6 +1026,7 @@ Perhaps it can be found at https://docs.raku.org/type/$name"
               method   => name,
               typename => type.^name,
               :private,
+              :in-class-call(nqp::eqaddr(nqp::what(SELF), nqp::getlexcaller('$?CLASS'))),
             ).throw;
     }
 
@@ -1154,7 +1156,7 @@ Perhaps it can be found at https://docs.raku.org/type/$name"
                 if $methods && !$class.HOW.archetypes.composable {
                     @methods.push: $_ with $class.^method_table{$name}
                 }
-                if $submethods {
+                if $submethods && nqp::can($class.HOW, 'submethod_table') {
                     @methods.push: $_ with $class.^submethod_table{$name}
                 }
             }
@@ -1268,8 +1270,12 @@ sub DUMP(|args (*@args, :$indent-step = 4, :%ctx?)) { # is implementation-detail
 
 # These must collapse Junctions
 proto sub so(Mu, *%) {*}
-multi sub so(Mu $x)  { ?$x }
-proto sub not(Mu, *%) {*}
-multi sub not(Mu $x) { !$x }
+multi sub so(Bool:U --> False) { }
+multi sub so(Bool:D \x) { x }
+multi sub so(Mu \x) { nqp::hllbool(nqp::istrue(x)) }
 
-# vim: ft=perl6 expandtab sw=4
+proto sub not(Mu, *%) {*}
+multi sub not(Bool:U --> True) { }
+multi sub not(Mu \x) { nqp::hllbool(nqp::isfalse(x)) }
+
+# vim: expandtab shiftwidth=4

@@ -7,11 +7,9 @@ class Encoding::Builtin does Encoding {
     }
 
     method SET-SELF(\name, \alternatives) is implementation-detail {
-        nqp::stmts(
-          ($!name := name),
-          ($!alternative-names := alternatives),
-          self
-        )
+        $!name := name;
+        $!alternative-names := alternatives;
+        self
     }
 
     method alternative-names() { $!alternative-names }
@@ -53,4 +51,4 @@ class Encoding::Builtin does Encoding {
     }
 }
 
-# vim: ft=perl6 expandtab sw=4
+# vim: expandtab shiftwidth=4

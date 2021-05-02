@@ -12,8 +12,7 @@ multi sub infix:<(elem)>(Str:D \a, Map:D \b --> Bool:D) {
         nqp::istrue(
             nqp::elems(my \storage := nqp::getattr(nqp::decont(b),Map,'$!storage'))
               && nqp::if(
-                   nqp::eqaddr(b.keyof,Str(Any)),
-                   nqp::atkey(storage,a),                       # normal hash
+                   nqp::istype(b,Hash::Object),
                    nqp::getattr(                                # object hash
                      nqp::ifnull(
                        nqp::atkey(storage,a.WHICH),
@@ -22,7 +21,8 @@ multi sub infix:<(elem)>(Str:D \a, Map:D \b --> Bool:D) {
                      ),
                      Pair,
                     '$!value'
-                   )
+                   ),
+                   nqp::atkey(storage,a)                        # normal hash
                  )
         )
     )
@@ -32,7 +32,7 @@ multi sub infix:<(elem)>(Any \a, Map:D \b --> Bool:D) {
         nqp::istrue(
             nqp::elems(                                       # haz a haystack
               my \storage := nqp::getattr(nqp::decont(b),Map,'$!storage')
-            ) && nqp::not_i(nqp::eqaddr(b.keyof,Str(Any)))    # is object hash
+            ) && nqp::istype(b,Hash::Object)
               && nqp::getattr(
                    nqp::ifnull(
                      nqp::atkey(storage,a.WHICH),             # exists
@@ -54,7 +54,7 @@ multi sub infix:<(elem)>(Any \a, Iterable:D \b --> Bool:D) {
 multi sub infix:<(elem)>(Any \a, Iterator:D \b --> Bool:D) {
     nqp::if(
       b.is-lazy,
-      Failure.new(X::Cannot::Lazy.new(:action<(elem)>)),
+      Any.fail-iterator-cannot-be-lazy('(elem)',''),
       nqp::stmts(
         (my str $needle = a.WHICH),
         nqp::until(
@@ -99,4 +99,4 @@ multi sub infix:<∋>(\a, \b --> Bool:D) { b (elem) a }
 proto sub infix:<∌>($, $, *%) is pure {*}
 multi sub infix:<∌>(\a, \b --> Bool:D) { not b (elem) a }
 
-# vim: ft=perl6 expandtab sw=4
+# vim: expandtab shiftwidth=4

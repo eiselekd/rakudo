@@ -18,7 +18,7 @@ my class Signature { # declared in BOOTSTRAP
     }
 
     method !SET-SELF(@params, Mu $returns, $arity, $count) {
-        nqp::bind(@!params,nqp::getattr(@params,List,'$!reified')),
+        nqp::bind(@!params,nqp::getattr(@params,List,'$!reified'));
         $!returns := $returns;
         $!arity    = $arity;
         $!count   := $count;
@@ -107,9 +107,9 @@ my class Signature { # declared in BOOTSTRAP
             nqp::clone(@!params));
     }
 
-    method !gistperl(Signature:D: $perl, Mu:U :$elide-type = Mu) {
+    method !gistraku(Signature:D: $raku, Mu:U :$elide-type = Mu) {
         # Opening.
-        my $text = $perl ?? ':(' !! '(';
+        my $text = $raku ?? ':(' !! '(';
 
         # Parameters.
         if self.params.Array -> @params {
@@ -125,7 +125,7 @@ my class Signature { # declared in BOOTSTRAP
                 $text ~= $sep ~ $_ with $param.raku(:$elide-type);
 
                 # Remove sigils from anon typed scalars, leaving type only
-                $text .= subst(/» ' $'$/,'') unless $perl;
+                $text .= subst(/» ' $'$/,'') unless $raku;
 
                 $sep = $param.multi-invocant && !@params[$i+1].?multi-invocant
                   ?? ';; '
@@ -144,10 +144,10 @@ my class Signature { # declared in BOOTSTRAP
     }
 
     multi method raku(Signature:D:) {
-        self!gistperl(True, :elide-type(self!deftype))
+        self!gistraku(True, :elide-type(self!deftype))
     }
     multi method gist(Signature:D:) {
-        self!gistperl(False, :elide-type(self!deftype))
+        self!gistraku(False, :elide-type(self!deftype))
     }
 }
 
@@ -223,4 +223,4 @@ Perl6::Metamodel::Configuration.set_multi_sig_comparator(
     -> \a, \b { a.signature eqv b.signature }
 );
 
-# vim: ft=perl6 expandtab sw=4
+# vim: expandtab shiftwidth=4

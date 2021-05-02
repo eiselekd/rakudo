@@ -80,16 +80,10 @@ my class Int does Real { # declared in BOOTSTRAP
         nqp::abs_I(self, Int)
     }
 
-    method Bridge(Int:D: --> Num:D) {
-        nqp::p6box_n(nqp::tonum_I(self));
-    }
-
-    method chr(Int:D: --> Str:D) {
-        nqp::if(
-          nqp::isbig_I(self),
-          die("chr codepoint %i (0x%X) is out of bounds".sprintf(self, self)),
-          nqp::p6box_s(nqp::chr(nqp::unbox_i(self)))
-        )
+    method Bridge(Int: --> Num:D) {
+        self.defined
+            ?? nqp::p6box_n(nqp::tonum_I(self))
+            !! self.Real::Bridge
     }
 
     method sqrt(Int:D: --> Num:D) {
@@ -157,7 +151,7 @@ my class Int does Real { # declared in BOOTSTRAP
     method expmod(Int:D: Int:D \base, Int:D \mod --> Int:D) {
         nqp::expmod_I(self, nqp::decont(base), nqp::decont(mod), Int);
     }
-    method is-prime(--> Bool:D) { nqp::hllbool(nqp::isprime_I(self,100)) }
+    method is-prime(--> Bool:D) { nqp::hllbool(nqp::isprime_I(self)) }
 
     method floor(Int:D:) { self }
     method ceiling(Int:D:) { self }
@@ -245,43 +239,6 @@ my class Int does Real { # declared in BOOTSTRAP
                   !! Range.new( -Inf, Inf, :excludes-min, :excludes-max )
             }
         }
-    }
-
-    my $nuprop := nqp::null;
-    my $deprop := nqp::null;
-    method unival(Int:D:) {
-        my str $de = nqp::getuniprop_str(
-          self,
-          nqp::ifnull(
-            $deprop,
-            $deprop := nqp::unipropcode("Numeric_Value_Denominator")
-          )
-        );
-        nqp::if(
-          nqp::chars($de),
-          nqp::if(                                    # some string to work with
-            nqp::iseq_s($de,"NaN"),
-            NaN,                                       # no value found
-            nqp::stmts(                                # value for denominator
-              (my str $nu = nqp::getuniprop_str(
-                self,
-                nqp::ifnull(
-                  $nuprop,
-                  $nuprop := nqp::unipropcode("Numeric_Value_Numerator")
-                )
-              )),
-              nqp::if(
-                nqp::iseq_s($de,"1"),
-                nqp::atpos(nqp::radix(10,$nu,0,0),0),   # just the numerator
-                Rat.new(                                # spotted a Rat
-                  nqp::atpos(nqp::radix(10,$nu,0,0),0),
-                  nqp::atpos(nqp::radix(10,$de,0,0),0)
-                )
-              )
-            )
-          ),
-          Nil                                          # no string, so no value
-        )
     }
 }
 
@@ -373,28 +330,36 @@ multi sub infix:<div>(int $a, int $b --> int) {
 }
 
 multi sub infix:<%>(Int:D \a, Int:D \b --> Int:D) {
-    nqp::if(
-      nqp::isbig_I(nqp::decont(a)) || nqp::isbig_I(nqp::decont(b)),
-      nqp::if(
-        b,
-        nqp::mod_I(nqp::decont(a),nqp::decont(b),Int),
-        Failure.new(X::Numeric::DivideByZero.new(:using<%>, :numerator(a)))
-      ),
-      nqp::if(
-        nqp::isne_i(b,0),
-        nqp::mod_i(    # quick fix https://github.com/Raku/old-issue-tracker/issues/4999
-          nqp::add_i(nqp::mod_i(nqp::decont(a),nqp::decont(b)),b),
-          nqp::decont(b)
-        ),
-        Failure.new(X::Numeric::DivideByZero.new(:using<%>, :numerator(a)))
-      )
-    )
+    nqp::isbig_I(nqp::decont(a)) || nqp::isbig_I(nqp::decont(b))
+      ?? b
+        ?? nqp::mod_I(nqp::decont(a),nqp::decont(b),Int)
+        !! Failure.new(X::Numeric::DivideByZero.new(:using<%>, :numerator(a)))
+      !! nqp::isne_i(b,0)
+        # quick fix https://github.com/Raku/old-issue-tracker/issues/4999
+        ?? nqp::mod_i(
+             nqp::add_i(nqp::mod_i(nqp::decont(a),nqp::decont(b)),b),
+             nqp::decont(b)
+           )
+        !! Failure.new(X::Numeric::DivideByZero.new(:using<%>, :numerator(a)))
 }
 multi sub infix:<%>(int $a, int $b --> int) {
     # relies on opcode or hardware to detect division by 0
     nqp::mod_i(nqp::add_i(nqp::mod_i($a,$b),$b),$b) # quick fix https://github.com/Raku/old-issue-tracker/issues/4999
 }
 
+multi sub infix:<%%>(Int:D \a, Int:D \b) {
+    nqp::isbig_I(nqp::decont(a)) || nqp::isbig_I(nqp::decont(b))
+      ?? b
+        ?? !nqp::mod_I(nqp::decont(a),nqp::decont(b),Int)
+        !! Failure.new(
+             X::Numeric::DivideByZero.new(using => 'infix:<%%>', numerator => a)
+           )
+      !! nqp::isne_i(b,0)
+        ?? nqp::hllbool(nqp::not_i(nqp::mod_i(nqp::decont(a),nqp::decont(b))))
+        !! Failure.new(
+             X::Numeric::DivideByZero.new(using => 'infix:<%%>', numerator => a)
+           )
+}
 multi sub infix:<%%>(int $a, int $b --> Bool:D) {
     nqp::hllbool(nqp::iseq_i(nqp::mod_i($a, $b), 0))
 }
@@ -415,6 +380,7 @@ multi sub infix:<**>(int $a, int $b --> int) {
     nqp::pow_i($a, $b);
 }
 
+multi sub infix:<lcm>(Int:D $x = 1) { $x }
 multi sub infix:<lcm>(Int:D \a, Int:D \b --> Int:D) {
     nqp::lcm_I(nqp::decont(a), nqp::decont(b), Int);
 }
@@ -422,6 +388,7 @@ multi sub infix:<lcm>(int $a, int $b --> int) {
     nqp::lcm_i($a, $b)
 }
 
+multi sub infix:<gcd>(Int:D $x) { $x }
 multi sub infix:<gcd>(Int:D \a, Int:D \b --> Int:D) {
     nqp::gcd_I(nqp::decont(a), nqp::decont(b), Int);
 }
@@ -524,11 +491,6 @@ multi sub prefix:<+^>(int $a --> int) {
    nqp::bitneg_i($a);
 }
 
-proto sub chr($, *%) is pure  {*}
-multi sub chr(Int:D  \x --> Str:D) { x.chr        }
-multi sub chr(Cool \x   --> Str:D) { x.Int.chr    }
-multi sub chr(int $x    --> str)   { nqp::chr($x) }
-
 proto sub is-prime($, *%) is pure {*}
 multi sub is-prime(\x --> Int:D) { x.is-prime }
 
@@ -546,4 +508,4 @@ multi sub lsb(Int:D \i --> Int:D) { i.lsb }
 proto sub msb($, *%) {*}
 multi sub msb(Int:D \i --> Int:D) { i.msb }
 
-# vim: ft=perl6 expandtab sw=4
+# vim: expandtab shiftwidth=4

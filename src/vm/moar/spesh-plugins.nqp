@@ -337,6 +337,9 @@ sub assign-scalar-no-whence($cont, $value) {
     my $desc := nqp::getattr($cont, Scalar, '$!descriptor');
     my $type := nqp::getattr($desc, ContainerDescriptor, '$!of');
     if nqp::istype($value, $type) {
+        if $type.HOW.archetypes.coercive {
+            $value := $type.HOW.coerce($type, $value);
+        }
         nqp::bindattr($cont, Scalar, '$!value', $value);
     }
     else {
@@ -358,6 +361,9 @@ sub assign-scalar-bindpos($cont, $value) {
     my $next := nqp::getattr($desc, ContainerDescriptor::BindArrayPos, '$!next-descriptor');
     my $type := nqp::getattr($next, ContainerDescriptor, '$!of');
     if nqp::istype($value, $type) {
+        if $type.HOW.archetypes.coercive {
+            $value := $type.HOW.coerce($type, $value);
+        }
         nqp::bindattr($cont, Scalar, '$!value', $value);
         nqp::bindpos(
             nqp::getattr($desc, ContainerDescriptor::BindArrayPos, '$!target'),
@@ -465,3 +471,5 @@ nqp::speshreg('Raku', 'assign', sub ($cont, $value) {
     # place.
     return &assign-fallback;
 });
+
+# vim: expandtab sw=4

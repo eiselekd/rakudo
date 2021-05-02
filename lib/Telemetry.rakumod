@@ -217,7 +217,7 @@ HEADER
               nqp::bindpos_i(
                 @data,
                 WALLCLOCK,
-                nqp::sub_i(nqp::fromnum_I(nqp::time_n() * 1000000,Int),$start)
+                nqp::sub_i(nqp::div_i(nqp::time,1000),$start)
               ),
               @data
             )
@@ -603,7 +603,7 @@ class Telemetry does Associative {
     }
 
     multi method raku(Telemetry:D: --> Str:D) {
-        self.^name ~ ".new$!samples.raku()"
+        self.^name ~ ".new$!samples.List.raku()"
     }
 
     method sampler() { $!sampler }
@@ -815,7 +815,7 @@ multi sub report(
 
     # set up basic header
     my $text := nqp::list_s(qq:to/HEADER/.chomp);
-Telemetry Report of Process #$*PID ({Instant.from-posix(nqp::time_i).DateTime})
+Telemetry Report of Process #$*PID ({Instant.from-posix(nqp::div_i(nqp::time,1000000000)).DateTime})
 Number of Snapshots: {+@s}
 HEADER
 
@@ -960,4 +960,4 @@ END {
     }
 }
 
-# vim: ft=perl6 expandtab sw=4
+# vim: expandtab shiftwidth=4

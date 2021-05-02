@@ -7,7 +7,6 @@ multi sub infix:<(+)>()               { bag() }
 multi sub infix:<(+)>(Bag:D \a)       { a     }
 multi sub infix:<(+)>(Mix:D \a)       { a     }
 multi sub infix:<(+)>(MixHash:D \a)   { a.Mix }
-multi sub infix:<(+)>(Any \a)         { a.Bag }
 
 multi sub infix:<(+)>(Setty:D \a, QuantHash:D \b) {
     nqp::if(
@@ -149,24 +148,29 @@ multi sub infix:<(+)>(Any \a, Any \b) {
       nqp::istype(a,QuantHash) && nqp::isconcrete(a),
       nqp::if(
         nqp::istype(a,Mixy) || nqp::istype(b,Mixy),
-        infix:<(+)>(a.Mixy,  b.Mix(:view)),
-        infix:<(+)>(a.Baggy, b.Bag(:view))
+        infix:<(+)>(a.Mixy,  b.Mix(:view)),  # :view is implementation-detail
+        infix:<(+)>(a.Baggy, b.Bag(:view))   # :view is implementation-detail
       ),
       nqp::if(
         nqp::istype(a,Mixy) || nqp::istype(b,Mixy),
-        infix:<(+)>(a.Mix, b.Mix(:view)),
-        infix:<(+)>(a.Bag, b.Bag(:view))
+        infix:<(+)>(a.Mix, b.Mix(:view)),    # :view is implementation-detail
+        infix:<(+)>(a.Bag, b.Bag(:view))     # :view is implementation-detail
       )
     )
 }
 
-multi sub infix:<(+)>(**@p) {
-    my $result = @p.shift;
-    $result = $result (+) @p.shift while @p;
-    $result
+multi sub infix:<(+)>(+@p) {    # also Any
+    my $result := @p.shift;
+    if @p {
+        $result := $result (+) @p.shift while @p;
+        $result
+    }
+    else {
+        $result.Bag
+    }
 }
 
 # U+228E MULTISET UNION
 my constant &infix:<⊎> := &infix:<(+)>;
 
-# vim: ft=perl6 expandtab sw=4
+# vim: expandtab shiftwidth=4

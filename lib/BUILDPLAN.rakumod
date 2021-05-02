@@ -59,9 +59,7 @@ sub build-steps(@plan) is export {
         @steps.push:
           nqp::istype(action,List)
             ?? showop(action)
-            !! $i
-              ?? "call obj.TWEAK"
-              !! "call obj.BUILD";
+            !! "call obj.{ action.package.^name }::{ action.name }"
     }
 
     @steps
@@ -172,3 +170,5 @@ sub EXPORT(*@classes) {
 
     EXPORT::DEFAULT::
 }
+
+# vim: expandtab shiftwidth=4

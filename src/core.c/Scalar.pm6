@@ -18,10 +18,13 @@ my class Scalar { # declared in BOOTSTRAP
         my $d := $!descriptor;
         nqp::isnull($d) ?? Nil !! $d.name()
     }
-    method of() {
-        my $d := $!descriptor;
-        nqp::isnull($d) ?? Mu !! $d.of;
+
+    proto method of() {*}
+    multi method of(Scalar:U:) { Mu }
+    multi method of(Scalar:D:) {
+        nqp::isnull($!descriptor) ?? Mu !! $!descriptor.of
     }
+
     method default() {
         my $d := $!descriptor;
         nqp::isnull($d) ?? Any !! $d.default;
@@ -43,4 +46,4 @@ my class IntPosRef  { }
 my class NumPosRef  { }
 my class StrPosRef  { }
 
-# vim: ft=perl6 expandtab sw=4
+# vim: expandtab shiftwidth=4

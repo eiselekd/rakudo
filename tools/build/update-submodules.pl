@@ -1,5 +1,5 @@
 #!/usr/bin/env perl
-# Copyright (C) 2009-2019 The Perl Foundation
+# Copyright (C) 2009-2021 The Perl Foundation
 
 use 5.10.1;
 use strict;
@@ -88,3 +88,4 @@ sub exec_and_check {
     }
 }
 
+# vim: expandtab sw=4

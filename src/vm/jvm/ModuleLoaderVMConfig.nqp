@@ -6,7 +6,7 @@ role Perl6::ModuleLoaderVMConfig {
         }
         @search_paths
     }
-    
+
     # Finds a setting to load.
     method find_setting($setting_name) {
         my $path := "$setting_name.setting.jar";
@@ -25,3 +25,5 @@ role Perl6::ModuleLoaderVMConfig {
         '.jar'
     }
 }
+
+# vim: expandtab sw=4

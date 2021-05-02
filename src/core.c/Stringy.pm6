@@ -2,12 +2,10 @@ my class X::NYI { ... }
 
 my role Stringy { }
 
-multi sub infix:<eqv>(Stringy:D \a, Stringy:D \b) {
+multi sub infix:<eqv>(Stringy:D \a, Stringy:D \b --> Bool:D) {
     nqp::hllbool(
-      nqp::unless(
-        nqp::eqaddr(a,b),
-        nqp::eqaddr(a.WHAT,b.WHAT) && nqp::iseq_i(a cmp b,0)
-      )
+      nqp::eqaddr(nqp::decont(a),nqp::decont(b))
+        || (nqp::eqaddr(a.WHAT,b.WHAT) && nqp::iseq_i(a cmp b,0))
     )
 }
 
@@ -30,9 +28,6 @@ multi sub infix:<x>($s, Num:D $n) {
 }
 multi sub infix:<x>($s, Any:D $n) { $s.Stringy x $n.Int         }
 multi sub infix:<x>($s, Any:U $n) { $s.Stringy x $n.Numeric.Int }
-
-proto sub infix:<leg>($, $, *%) is pure {*}
-multi sub infix:<leg>(\a, \b)      { a.Stringy cmp b.Stringy }
 
 proto sub infix:<eq>($?, $?, *%)  is pure {*}
 multi sub infix:<eq>($x?)          { Bool::True }
@@ -75,4 +70,4 @@ multi sub infix:<~&>(\a, \b)       { a.Stringy ~& b.Stringy }
 proto sub prefix:<~^>($, *%) is pure {*}
 multi sub prefix:<~^>(\a)         { ~^ a.Stringy }
 
-# vim: ft=perl6 expandtab sw=4
+# vim: expandtab shiftwidth=4

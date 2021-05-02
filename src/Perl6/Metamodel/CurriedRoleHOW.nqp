@@ -21,6 +21,7 @@ class Perl6::Metamodel::CurriedRoleHOW
     does Perl6::Metamodel::Naming
     does Perl6::Metamodel::RoleContainer
     does Perl6::Metamodel::LanguageRevision
+    does Perl6::Metamodel::InvocationProtocol
 {
     has $!curried_role;
     has $!candidate;                # Will contain matching candidate from curried role group
@@ -71,6 +72,8 @@ class Perl6::Metamodel::CurriedRoleHOW
         my $meta := self.new(:curried_role($curried_role), :pos_args(@pos_args),
             :named_args(%named_args), :name($name));
         my $type := nqp::settypehll(nqp::newtype($meta, 'Uninstantiable'), 'Raku');
+        $meta.set_name($type, $name);
+        $meta.compose_invocation($type);
 
         nqp::settypecheckmode($type, 2);
     }
@@ -245,6 +248,9 @@ class Perl6::Metamodel::CurriedRoleHOW
         $curried_role.HOW.name($curried_role);
     }
 
+    method is-implementation-detail($obj) {
+        $!curried_role.is-implementation-detail($obj)
+    }
 }
 
 # vim: expandtab sw=4

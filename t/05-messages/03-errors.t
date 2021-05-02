@@ -51,10 +51,10 @@ subtest 'subsets get named in typecheck errors' => {
 subtest 'like/unlike failures give useful diagnostics' => {
     plan 2;
     is-run ｢use Test; plan 1; like 42, /43/｣,
-        :1exitcode, :out(*), :err{.contains: 'expected a match with'},
+        :1exitcode, :compiler-args[<-I lib>], :out(*), :err{.contains: 'expected a match with'},
     '`like` says it wanted a match, not just "expected"';
     is-run ｢use Test; plan 1; unlike 42, /42/｣,
-        :1exitcode, :out(*), :err{.contains: 'expected no match with'},
+        :1exitcode, :compiler-args[<-I lib>], :out(*), :err{.contains: 'expected no match with'},
     '`unlike` says it wanted no match, not just "expected"';
 }
 
@@ -153,7 +153,7 @@ subtest 'numeric backslash errors do not get accompanied by confusing others' =>
     plan 3;
     my &err = {.contains: 'backslash sequence' & none 'quantifies nothing' }
     is-run ｢"a" ~~ /(a)\1+$/｣, :&err, :exitcode, 'regex';
-    is-run ｢"\1"｣,             :&err, :exitcode, 'qouble quotes';
+    is-run ｢"\1"｣,             :&err, :exitcode, 'double quotes';
     is-run ｢Q:qq:cc/\1/｣,      :&err, :exitcode, ':qq:cc quoter';
 }
 
@@ -175,4 +175,4 @@ cmp-ok X::OutOfRange.new(
 is-run 'class { method z { $^a } }', :err{ my @lines = $^msg.lines; @lines.grep({ !/'⏏'/ && .contains: '$^a' }) }, :exitcode{.so},
 'Use placeholder variables in a method should yield a useful error message';
 
-# vim: ft=perl6 expandtab sw=4
+# vim: expandtab shiftwidth=4

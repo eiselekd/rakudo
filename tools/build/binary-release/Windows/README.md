@@ -11,7 +11,7 @@ Running Raku
 
 To run a Raku program, open a command prompt and type
 
-    C:\path\to\this\folder\bin\raku.exe my_script.p6
+    C:\path\to\this\folder\bin\raku.exe my_script.raku
 
 or start a REPL by calling `raku.exe` without an argument
 
@@ -65,6 +65,35 @@ To make use of the Build Tools in Rakudo using PowerShell:
 - start a PowerShell window using
     Start Menu -> Visual Studio 2019 -> Developer PowerShell for VS 2019
 - Execute `C:\path\to\this\folder\scripts\set-env.ps1`
+
+
+Non-console applications
+------------------------
+
+On Windows programs are compiled to either be _console_ applications or
+_non-console_ applications. _Console_ applications always open a console
+window. There is no straightforward way to suppress this window.
+
+Rakudo provides a separate set of executables suffixed with a 'w' (`rakuw.exe`,
+`rakudow.exe`, ...) that are compiled as _non-console_ applications. These do
+not spawn this console window.
+
+**WARNING** These _non-console_ applications do not have their `STDIN`,
+`STDOUT` and `STDERR` attached. Trying to write to these handles will cause the
+application to abort.
+
+One can place the following snippet at the top of a program to have all its
+output be silently ignored instead.
+
+    $*OUT=$*ERR=class {method print(*@args){}};
+
+
+**WARNING** By default these _non-console_ applications will silently swallow
+everything that is printed to `STDOUT` and `STDERR`.
+
+To receive the output of the program it suffices to redirect it externally:
+
+    rakuw.exe script.raku >stdout.txt 2>stderr.txt
 
 
 Changes
@@ -121,7 +150,7 @@ for more information.
 License
 =======
 
-Rakudo is Copyright © 2008-2020, The Perl Foundation. Rakudo is distributed
+Rakudo is Copyright © 2008-2021, The Perl Foundation. Rakudo is distributed
 under the terms of the Artistic License 2.0. For more details, see the full
 text of the license in the file LICENSE.
 

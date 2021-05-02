@@ -1,3 +1,5 @@
+include/
+share/
 /gen/*
 /nqp/
 repo/
@@ -104,6 +106,8 @@ perl6.rc
 /inst-perl6-debug.exe
 /inst-perl6-m.exe
 /inst-perl6-debug-m.exe
+/inst-perl6w.exe
+/inst-perl6w-m.exe
 /inst-rakudo
 /inst-rakudo-debug
 /inst-rakudo-m
@@ -112,6 +116,8 @@ perl6.rc
 /inst-rakudo-debug.exe
 /inst-rakudo-m.exe
 /inst-rakudo-debug-m.exe
+/inst-rakudow.exe
+/inst-rakudow-m.exe
 t/localtest.data
 t/spec
 t/packages/tap-harness6
@@ -145,3 +151,6 @@ t/03-jvm/*.class
 /zef
 .DS_Store
 node_modules/*
+rakudo-m-early-build
+rakudo-js-build
+rakudo-j-build

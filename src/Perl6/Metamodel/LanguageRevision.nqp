@@ -18,7 +18,7 @@ role Perl6::Metamodel::LanguageRevision
             my $rev;
             # $*W cannot be used at optimization stage.
             if $*W && !$*OPTIMIZER-SYMBOLS {
-                $rev := $*W.find_symbol(['CORE-SETTING-REV'], :setting-only) || $*W.setting_revision;
+                $rev := $*W.find_single_symbol('CORE-SETTING-REV', :setting-only) || $*W.setting_revision;
             }
             $lang-ver := ($rev && '6.' ~ $rev)                          # compile-time if CORE is available
                           || nqp::getcomp('Raku').language_version;    # otherwise try the compiler
@@ -57,9 +57,14 @@ role Perl6::Metamodel::LanguageRevision
     # Because there could be more than one such boundary in the future they can be passed as an array.
     method check-type-compat($obj, $type, @revs) {
         unless nqp::isnull(self.incompat-revisions($obj, $!lang_rev, $type.HOW.language-revision($type), @revs)) {
-            nqp::die("Type object " ~ $obj.HOW.name($obj) ~ " of v6." ~ $!lang_rev
+            Perl6::Metamodel::Configuration.throw_or_die(
+                'X::Language::IncompatRevisions',
+                "Type object " ~ $obj.HOW.name($obj) ~ " of v6." ~ $!lang_rev
                     ~ " is not compatible with " ~ $type.HOW.name($type)
-                    ~ " of v6." ~ $type.HOW.language-revision($type));
+                    ~ " of v6." ~ $type.HOW.language-revision($type),
+                :type-a($obj),
+                :type-b($type)
+            )
         }
     }
 
@@ -76,4 +81,10 @@ role Perl6::Metamodel::LanguageRevision
     method language-revision($obj) {
         $!lang_rev
     }
+
+    method language-version($obj) {
+        '6.' ~ $!lang_rev
+    }
 }
+
+# vim: expandtab sw=4

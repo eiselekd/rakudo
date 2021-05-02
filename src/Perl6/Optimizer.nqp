@@ -1,5 +1,5 @@
-# This file contains a bunch of classes related to static optimization of Perl
-# 6 programs. It takes place after we've done all of the stuff in the grammar
+# This file contains a bunch of classes related to static optimization of Raku
+# programs. It takes place after we've done all of the stuff in the grammar
 # and actions, which means CHECK time is over. Thus we're allowed to assume that
 # lexpads are immutable, declarations are over and done with, multi candidate
 # lists won't change and so forth.
@@ -670,14 +670,13 @@ my class BlockVarOptimizer {
         # If we found things to eliminate, do so.
         if %kill {
             my @setups := @($block[0]);
-            my int $i  := 0;
             my int $n  := nqp::elems(@setups);
-            while $i < $n {
+            my int $i  := -1;
+            while ++$i < $n {
                 my $consider := @setups[$i];
                 if nqp::istype($consider, QAST::Var) && nqp::existskey(%kill, $consider.name) {
                     @setups[$i] := $NULL;
                 }
-                $i++;
             }
         }
     }
@@ -737,7 +736,7 @@ my class BlockVarOptimizer {
             unless nqp::existskey(%!usages_inner, $name) ||
                     nqp::existskey(%!used_in_handle_handler, $name) {
                 # Lowerable if it's a normal variable, including $_ if we're in a
-                # Perl 6 version that allows lowering that.
+                # Raku version that allows lowering that.
                 next if nqp::chars($name) < 1;
                 unless nqp::iscclass(nqp::const::CCLASS_ALPHABETIC, $name, 0) {
                     my str $sigil := nqp::substr($name, 0, 1);
@@ -2297,7 +2296,7 @@ class Perl6::Optimizer {
             elsif $is-reverse {
               # We end up with two calls of the op if var is not definite.
               # This is by design:
-              # https://irclog.perlgeek.de/perl6-dev/2018-01-12#i_15681388
+              # https://colabti.org/irclogger/irclogger_log/perl6-dev?date=2018-01-12#l208
               $op.push:
               QAST::Op.new: :op<call>, :name($metaop[0][0].name),
                 $operand,
@@ -2309,7 +2308,7 @@ class Perl6::Optimizer {
             else {
               # We end up with two calls of the op if var is not definite.
               # This is by design:
-              # https://irclog.perlgeek.de/perl6-dev/2018-01-12#i_15681388
+              # https://colabti.org/irclogger/irclogger_log/perl6-dev?date=2018-01-12#l208
               $op.push:
               QAST::Op.new: :op<call>, :name($metaop[0].name),
                 QAST::Op.new(:op<if>,
@@ -2338,8 +2337,11 @@ class Perl6::Optimizer {
       elsif self.op_eq_core($metaop, '&METAOP_REVERSE') {
         return NQPMu unless nqp::istype($metaop[0], QAST::Var)
           && nqp::elems($op) == 3;
-        return QAST::Op.new(:op<call>, :name($metaop[0].name),
-                $op[2], $op[1]).annotate_self: 'METAOP_opt_result', 1;
+        my $opt_result := QAST::Op.new(:op<call>, :name($metaop[0].name),
+          $op[2], $op[1]).annotate_self: 'METAOP_opt_result', 1;
+        if $op.named { $opt_result.named($op.named) }
+        if $op.flat { $opt_result.flat($op.flat) }
+        return self.visit_op: $opt_result;
       }
       NQPMu
     }
@@ -2385,7 +2387,8 @@ class Perl6::Optimizer {
                 else {
                     $!problems.add_exception(['X', 'Method', 'NotFound'], $op,
                         :private(nqp::hllboolfor(1, "Raku")), :method($name),
-                        :typename($pkg.HOW.name($pkg)), :invocant($pkg));
+                        :typename($pkg.HOW.name($pkg)), :invocant($pkg),
+                        :in-class-call(nqp::hllboolfor(1, "Raku")));
                     return 1;
                 }
             }
@@ -2750,7 +2753,7 @@ class Perl6::Optimizer {
                 $type.HOW.archetypes.nominal();
             unless $ok_type {
                 # nqp::ops end up labeled with nqp primitive types; we swap
-                # those out for their Perl 6 equivalents.
+                # those out for their Raku equivalents.
                 my int $ps := nqp::objprimspec($type);
                 if $ps >= 1 && $ps <= 3 {
                     $type := $!symbols.find_lexical(@prim_names[$ps]);
@@ -2795,14 +2798,13 @@ class Perl6::Optimizer {
 
     method report_inevitable_dispatch_failure($op, @types, @flags, $obj, :$protoguilt) {
         my @arg_names;
-        my int $i := 0;
-        while $i < +@types {
+        my int $i := -1;
+        while ++$i < +@types {
             @arg_names.push(
                 @flags[$i] == 1 ?? 'int' !!
                 @flags[$i] == 2 ?? 'num' !!
                 @flags[$i] == 3 ?? 'str' !!
                 @types[$i].HOW.name(@types[$i]));
-            $i := $i + 1;
         }
 
         my %opts := nqp::hash();
@@ -3207,4 +3209,4 @@ class Perl6::Optimizer {
     }
 }
 
-# vim: ft=perl6 expandtab sw=4
+# vim: expandtab sw=4

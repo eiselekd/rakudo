@@ -1,15 +1,12 @@
 my role QuantHash does Associative {
 
     method keyof() { Mu }
+    method item() is raw { my $ = self }
 
     method SET-SELF(QuantHash:D: \elems) is implementation-detail {
-        nqp::stmts(
-          nqp::if(
-            nqp::elems(elems),
-            nqp::bindattr(self,::?CLASS,'$!elems',elems)
-          ),
-          self
-        )
+        nqp::bindattr(self,::?CLASS,'$!elems',elems)
+          if nqp::elems(elems);
+        self
     }
 
     # provide a proto for QuantHashes from here
@@ -48,6 +45,7 @@ my role QuantHash does Associative {
 
     method hash() { ... }
     method Hash() { ... }
+    method Map()  { ... }
 }
 
-# vim: ft=perl6 expandtab sw=4
+# vim: expandtab shiftwidth=4

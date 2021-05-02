@@ -30,16 +30,14 @@ my role Rakudo::SlippyIterator does Iterator {
     }
 
     method slip-one() {
-        nqp::stmts(
-          nqp::if(
-            nqp::eqaddr((my \result := $!slip-iter.pull-one),IterationEnd),
-            nqp::stmts(
-              ($!slipping = 0),
-              ($!slip-iter := nqp::null)
-            )
-          ),
-          result
-        )
+        nqp::if(
+          nqp::eqaddr((my \result := $!slip-iter.pull-one),IterationEnd),
+          nqp::stmts(
+            ($!slipping = 0),
+            ($!slip-iter := nqp::null)
+          )
+        );
+        result
     }
 
     proto method slip-all(|) {*}
@@ -52,6 +50,7 @@ my role Rakudo::SlippyIterator does Iterator {
           $slip.iterator.push-all(target)
         )
     }
+    method is-deterministic(--> False) { }
 }
 
-# vim: ft=perl6 expandtab sw=4
+# vim: expandtab shiftwidth=4

@@ -4,15 +4,15 @@ use Test::Helpers;
 
 plan 11;
 
-subtest '.lang-ver-before method on Perl6::World' => {
+subtest '.lang-rev-before method on Perl6::World' => {
     plan 5;
-    is-run ｢use v6.c; BEGIN print ?$*W.lang-ver-before: 'd'｣, 'c is before d', :out<True>;
-    is-run ｢use v6.c; BEGIN print ?$*W.lang-ver-before: 'c'｣, 'c is not before d', :out<False>;
-    is-run ｢use v6.e.PREVIEW; BEGIN print ?$*W.lang-ver-before: 'e'｣, 'e.PREVIEW is not before e', :out<False>;
-    is-run ｢use v6.e.PREVIEW; BEGIN print ?$*W.lang-ver-before: 'd'｣, 'e is not before d', :out<False>;
-    throws-like ｢BEGIN $*W.lang-ver-before: <6.d>｣, Exception,
+    is-run ｢use v6.c; BEGIN print ?$*W.lang-rev-before: 'd'｣, 'c is before d', :out<True>;
+    is-run ｢use v6.c; BEGIN print ?$*W.lang-rev-before: 'c'｣, 'c is not before d', :out<False>;
+    is-run ｢use v6.e.PREVIEW; BEGIN print ?$*W.lang-rev-before: 'e'｣, 'e.PREVIEW is not before e', :out<False>;
+    is-run ｢use v6.e.PREVIEW; BEGIN print ?$*W.lang-rev-before: 'd'｣, 'e is not before d', :out<False>;
+    throws-like ｢BEGIN $*W.lang-rev-before: <6.d>｣, Exception,
         :self{.exception.message.contains: 'must be 1 char long'},
-    'using wrong version format as argument throws';
+        'using wrong revision format as argument throws';
 }
 
 subtest 'IO::Handle.raku.EVAL roundtrips' => {
@@ -68,7 +68,7 @@ eval-lives-ok ｢
 # https://github.com/rakudo/rakudo/issues/1315
 # https://github.com/rakudo/rakudo/issues/1477
 # The non-optimizing custom stuff might not be spec material:
-# https://irclog.perlgeek.de/perl6-dev/2018-02-07#i_15786958
+# https://colabti.org/irclogger/irclogger_log/perl6-dev?date=2018-02-07#l44
 # and with extra comments on https://github.com/rakudo/rakudo/issues/1477#issuecomment-363644261
 subtest 'postfix-to-prefix-inc-dec opt does not rewrite custom ops' => {
     plan 5;
@@ -137,12 +137,12 @@ subtest 'postfix-to-prefix-inc-dec opt does not rewrite custom ops' => {
 
 group-of 2 => 'collation experiment' => {
     is-run ｢$*COLLATION.set: :primary; print 'pass'｣,
-        :out<pass>, '$*COLLECTION.set no longer requires experimental pragma';
+        :out<pass>, '$*COLLATION.set no longer requires experimental pragma';
     is-run ｢
         use experimental :collation;
         $*COLLATION.set: :primary;
         print 'pass'
-    ｣, :out<pass>, 'we can still use the pragma (to support old code)';
+    ｣, :out<pass>, :compiler-args[<-I lib>], 'we can still use the pragma (to support old code)';
 }
 
 subtest 'Distribution::Resource can be stringified', {
@@ -157,3 +157,5 @@ class ParameterChild is Parameter {
 is ParameterChild.new(foobar => 'Baz').foobar, 'Baz', 'Subclassing of Parameter works';
 
 is Parameter.new(:name('$a'), :type(Int), :optional).perl, 'Int $a?', 'Parameter takes by-name parameters itself';
+
+# vim: expandtab shiftwidth=4

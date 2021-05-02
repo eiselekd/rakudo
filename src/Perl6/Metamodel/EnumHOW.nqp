@@ -92,7 +92,7 @@ class Perl6::Metamodel::EnumHOW
         }
         nqp::existskey(%!value_to_enum, $value)
             ?? %!value_to_enum{$value}
-            !! $obj.WHAT;
+            !! nqp::null()
     }
 
     method enum_value_list($obj) {
@@ -198,3 +198,5 @@ class Perl6::Metamodel::EnumHOW
         @!role_typecheck_list
     }
 }
+
+# vim: expandtab sw=4

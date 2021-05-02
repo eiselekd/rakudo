@@ -3,10 +3,11 @@ use lib <t/packages>;
 use Test;
 use Test::Helpers;
 
-plan 45;
+plan 47;
 
 my $eof = $*DISTRO.is-win ?? "'^Z'" !! "'^D'";
 my $*REPL-SCRUBBER = -> $_ is copy {
+    $_ = .lines.skip(4).join("\n");
     s/^^ "You may want to `zef install Readline` or `zef install Linenoise`"
         " or use rlwrap for a line editor\n\n"//;
     s/^^ "To exit type 'exit' or $eof\n"//;
@@ -219,7 +220,7 @@ is-run-repl ['Nil'], /Nil/, 'REPL outputs Nil as a Nil';
                                               'num32 $i,  num64 $j,',
                     ') = 1, 2, 3, 4, 5, 6, 7, 8, 9e0, 10e0;';
 
-    todo 'https://github.com/Raku/old-issue-tracker/issues/5245';
+    todo 'https://github.com/rakudo/rakudo/issues/4161';
     is-run-repl "$code\nsay 'test is good';\n",
         :err(''),
         :out(/'(1 2 3 4 5 6 7 8 9 10)' .* 'test is good'/),
@@ -243,6 +244,13 @@ is-run-repl ['Nil'], /Nil/, 'REPL outputs Nil as a Nil';
         :out(/'The value is 42'/),
     'variables persist across multiple lines of input';
 }
+
+# https://github.com/Raku/old-issue-tracker/issues/2917
+is-run-repl "my \\a = any set <1 2 3>;\nsay 1 ~~ a",
+    :out{
+        .contains('any') and .contains('False') and not .contains: 'True';
+    },
+    'REPL does neither crash nor report True and False for junction';
 
 {
     # If the REPL evaluates all of the previously-entered code on each
@@ -291,6 +299,11 @@ is-run-repl "say 42; none True\n", :err(''), :out{
     .contains('42') and not .contains: 'No such method';
 }, 'REPL does not explode with none Junction return values';
 
+# https://github.com/Raku/old-issue-tracker/issues/3254
+is-run-repl '"asa" ~~ /:s ^a* %',
+    :out{.contains: 'Missing quantifier' and not .contains('NullPointerException')},
+    'REPL detects incomplete regex (no NullPointerException)';
+
 # https://github.com/Raku/old-issue-tracker/issues/2768
 is-run-repl '$_**2',
     :out{!.contains('message') and !.contains('not found')
@@ -314,3 +327,5 @@ is-run-repl 'my $fh = $*EXECUTABLE.open(:r)',
 	:out{.contains: 'IO::Handle' and not .contains('Failed to write')},
 	:err(''),
 	｢no complaints about failed writing to filehandle when opening a file｣;
+
+# vim: expandtab shiftwidth=4

@@ -107,7 +107,7 @@ my stub Int64MultidimRef metaclass Perl6::Metamodel::NativeRefHOW { ... };
 # The JVM backend really only uses trial_bind,
 # so we exclude everything else.
 my class Binder {
-    # Flags that can be set on a signature element.
+    # Flags that can be set on a signature element. See Parameter.pm6
     my int $SIG_ELEM_BIND_CAPTURE        := 1;
     my int $SIG_ELEM_BIND_PRIVATE_ATTR   := 2;
     my int $SIG_ELEM_BIND_PUBLIC_ATTR    := 4;
@@ -128,7 +128,7 @@ my class Binder {
     my int $SIG_ELEM_UNDEFINED_ONLY      := 65536;
     my int $SIG_ELEM_DEFINED_ONLY        := 131072;
     my int $SIG_ELEM_DEFINEDNES_CHECK    := ($SIG_ELEM_UNDEFINED_ONLY +| $SIG_ELEM_DEFINED_ONLY);
-    my int $SIG_ELEM_NOMINAL_GENERIC     := 524288;
+    my int $SIG_ELEM_TYPE_GENERIC        := 524288;
     my int $SIG_ELEM_DEFAULT_IS_LITERAL  := 1048576;
     my int $SIG_ELEM_NATIVE_INT_VALUE    := 2097152;
     my int $SIG_ELEM_NATIVE_NUM_VALUE    := 4194304;
@@ -137,6 +137,7 @@ my class Binder {
     my int $SIG_ELEM_SLURPY_ONEARG       := 16777216;
     my int $SIG_ELEM_SLURPY              := ($SIG_ELEM_SLURPY_POS +| $SIG_ELEM_SLURPY_NAMED +| $SIG_ELEM_SLURPY_LOL +| $SIG_ELEM_SLURPY_ONEARG);
     my int $SIG_ELEM_CODE_SIGIL          := 33554432;
+    my int $SIG_ELEM_IS_COERCIVE         := 67108864;
 
     # Binding result flags.
     my int $BIND_RESULT_OK       := 0;
@@ -199,7 +200,7 @@ my class Binder {
     }
 
     # Binds a single parameter.
-    sub bind_one_param($lexpad, $sig, $param, int $no_nom_type_check, $error,
+    sub bind_one_param($lexpad, $sig, $param, int $no_param_type_check, $error,
                        int $got_native, $oval, int $ival, num $nval, str $sval) {
         # Grab flags and variable name.
         my int $flags       := nqp::getattr_i($param, Parameter, '$!flags');
@@ -284,30 +285,29 @@ my class Binder {
         # By this point, we'll either have an object that we might be able to
         # bind if it passes the type check, or a native value that needs no
         # further checking.
-        my $nom_type;
+        my $param_type := nqp::getattr($param, Parameter, '$!type');
         unless $got_native || ($is_rw && $desired_native) {
             # HLL-ize.
             $oval := nqp::hllizefor($oval, 'Raku');
 
             # Skip nominal type check if not needed.
-            unless $no_nom_type_check {
+            unless $no_param_type_check {
                 # Is the nominal type generic and in need of instantiation? (This
                 # can happen in (::T, T) where we didn't learn about the type until
                 # during the signature bind).
-                $nom_type := nqp::getattr($param, Parameter, '$!nominal_type');
-                if $flags +& $SIG_ELEM_NOMINAL_GENERIC {
-                    $nom_type := $nom_type.HOW.instantiate_generic($nom_type, $lexpad);
+                if $flags +& $SIG_ELEM_TYPE_GENERIC {
+                    $param_type := $param_type.HOW.instantiate_generic($param_type, $lexpad);
                 }
 
                 # If the expected type is Positional, see if we need to do the
                 # positional bind failover.
-                if nqp::istype($nom_type, $Positional) && nqp::istype($oval, $PositionalBindFailover) {
+                if nqp::istype($param_type, $Positional) && nqp::istype($oval, $PositionalBindFailover) {
                     $oval := $oval.cache;
                 }
 
                 # If not, do the check. If the wanted nominal type is Mu, then
                 # anything goes.
-                unless $nom_type =:= Mu || nqp::istype($oval, $nom_type) {
+                unless $param_type =:= Mu || nqp::istype($oval, $param_type) {
                     # Type check failed; produce error if needed.
 
                     # Try to figure out the most helpful name for the expected
@@ -315,7 +315,7 @@ my class Binder {
                       (my $post := nqp::getattr($param, Parameter,
                         '@!post_constraints'))
                       && ! nqp::istype(nqp::atpos($post, 0), Code)
-                    ) ?? nqp::atpos($post, 0) !! $nom_type;
+                    ) ?? nqp::atpos($post, 0) !! $param_type;
 
                     if nqp::defined($error) {
                         my %ex := nqp::gethllsym('Raku', 'P6EX');
@@ -342,7 +342,7 @@ my class Binder {
                     {
                         if nqp::defined($error) {
                             my $method := nqp::getcodeobj(nqp::ctxcode($lexpad)).name;
-                            my $class  := $nom_type.HOW.name($nom_type);
+                            my $class  := $param_type.HOW.name($param_type);
                             my $got    := $oval.HOW.name($oval);
                             my %ex     := nqp::gethllsym('Raku', 'P6EX');
                             if nqp::isnull(%ex) || !nqp::existskey(%ex, 'X::Parameter::RW') {
@@ -370,16 +370,14 @@ my class Binder {
         my $type_caps := nqp::getattr($param, Parameter, '@!type_captures');
         unless nqp::isnull($type_caps) {
             my int $num_type_caps := nqp::elems($type_caps);
-            my int $i := 0;
-            while $i < $num_type_caps {
+            my int $i := -1;
+            while ++$i < $num_type_caps {
                 nqp::bindkey($lexpad, nqp::atpos_s($type_caps, $i), $oval.WHAT);
-                ++$i;
             }
         }
 
         # Do a coercion, if one is needed.
-        my $coerce_type := nqp::getattr($param, Parameter, '$!coerce_type');
-        unless nqp::isnull($coerce_type) {
+        if $param.coercive {
             # Coercing natives not possible - nothing to call a method on.
             if $got_native {
                 if nqp::defined($error) {
@@ -388,30 +386,8 @@ my class Binder {
                 return $BIND_RESULT_FAIL;
             }
 
-            # Is the coercion target generic and in need of instantiation? (This
-            # can happen in (::T, T) where we didn't learn about the type until
-            # during the signature bind).
-            my $coerce_method := nqp::getattr($param, Parameter, '$!coerce_method');
-            if $coerce_type.HOW.archetypes.generic {
-                $coerce_type   := $coerce_type.HOW.instantiate_generic($coerce_type, $lexpad);
-                $coerce_method := $coerce_type.HOW.name($coerce_type);
-            }
-
-            # Only coerce if we don't already have the correct type.
-            unless nqp::istype($oval, $coerce_type) {
-                if nqp::can($oval, $coerce_method) {
-                    $oval := $oval."$coerce_method"();
-                }
-                else {
-                    # No coercion method available; whine and fail to bind.
-                    if nqp::defined($error) {
-                        $error[0] := "Unable to coerce value for '$varname' from " ~
-                            $oval.HOW.name($oval) ~
-                            " to $coerce_method; no coercion method defined";
-                    }
-                    return $BIND_RESULT_FAIL;
-                }
-            }
+            my $coercion_type := $param_type.HOW.wrappee($param_type, :coercion);
+            $oval := $coercion_type.HOW.coerce($coercion_type, $oval);
         }
 
         # If it's not got attributive binding, we'll go about binding it into the
@@ -504,8 +480,8 @@ my class Binder {
         my $post_cons := nqp::getattr($param, Parameter, '@!post_constraints');
         unless nqp::isnull($post_cons) {
             my int $n := nqp::elems($post_cons);
-            my int $i := 0;
-            while $i < $n {
+            my int $i := -1;
+            while ++$i < $n {
                 # Check we meet the constraint.
                 my $cons_type := nqp::atpos($post_cons, $i);
                 if nqp::istype($cons_type, Code) {
@@ -541,7 +517,6 @@ my class Binder {
                     }
                     return $BIND_RESULT_FAIL;
                 }
-                ++$i;
             }
         }
 
@@ -606,7 +581,7 @@ my class Binder {
 
             # Recurse into signature binder.
             my $result := bind(make_vm_capture($capture), $subsig, $lexpad,
-                $no_nom_type_check, $error);
+                $no_param_type_check, $error);
             unless $result == $BIND_RESULT_OK {
                 if $error && nqp::isstr($error[0]) {
                     # Note in the error message that we're in a sub-signature.
@@ -652,13 +627,13 @@ my class Binder {
                 nqp::create(Hash)
             }
             else {
-                nqp::getattr($param, Parameter, '$!nominal_type');
+                nqp::getattr($param, Parameter, '$!type');
             }
         }
     }
 
     # Drives the overall binding process.
-    sub bind($capture, $sig, $lexpad, int $no_nom_type_check, $error) {
+    sub bind($capture, $sig, $lexpad, int $no_param_type_check, $error) {
         # Get params.
         my @params := nqp::getattr($sig, Signature, '@!params');
 
@@ -681,7 +656,7 @@ my class Binder {
             my $param := nqp::atpos(@params, $i);
             my int $flags := nqp::getattr_i($param, Parameter, '$!flags');
             my str $var_name := nqp::getattr_s($param, Parameter, '$!variable_name');
-            $i := $i + 1;
+            ++$i;
 
             # Is it looking for us to bind a capture here?
             my int $bind_fail;
@@ -725,7 +700,7 @@ my class Binder {
                         nqp::bindattr($capsnap, Capture, '%!hash', nqp::hash());
                     }
 
-                    $bind_fail := bind_one_param($lexpad, $sig, $param, $no_nom_type_check, $error,
+                    $bind_fail := bind_one_param($lexpad, $sig, $param, $no_param_type_check, $error,
                         0, $capsnap, 0, 0.0, '');
                 }
                 if ($bind_fail) {
@@ -755,7 +730,7 @@ my class Binder {
                 # whenever needed.
                 my $hash := nqp::create(Hash);
                 nqp::bindattr($hash, Map, '$!storage', $named_args) if $named_args;
-                $bind_fail := bind_one_param($lexpad, $sig, $param, $no_nom_type_check, $error,
+                $bind_fail := bind_one_param($lexpad, $sig, $param, $no_param_type_check, $error,
                     0, $hash, 0, 0.0, '');
                 return $bind_fail if $bind_fail;
 
@@ -793,7 +768,7 @@ my class Binder {
                         !! $flags +& $SIG_ELEM_SLURPY_POS
                         ?? $slurpy_type.from-slurpy-flat($temp)
                         !! $slurpy_type.from-slurpy($temp);
-                    $bind_fail := bind_one_param($lexpad, $sig, $param, $no_nom_type_check, $error,
+                    $bind_fail := bind_one_param($lexpad, $sig, $param, $no_param_type_check, $error,
                         0, $bindee, 0, 0.0, '');
                     return $bind_fail if $bind_fail;
                 }
@@ -805,19 +780,19 @@ my class Binder {
                         # Easy - just bind that.
                         $got_prim := nqp::captureposprimspec($capture, $cur_pos_arg);
                         if $got_prim == 0 {
-                            $bind_fail := bind_one_param($lexpad, $sig, $param, $no_nom_type_check, $error,
+                            $bind_fail := bind_one_param($lexpad, $sig, $param, $no_param_type_check, $error,
                                 0, nqp::captureposarg($capture, $cur_pos_arg), 0, 0.0, '');
                         }
                         elsif $got_prim == 1 {
-                            $bind_fail := bind_one_param($lexpad, $sig, $param, $no_nom_type_check, $error,
+                            $bind_fail := bind_one_param($lexpad, $sig, $param, $no_param_type_check, $error,
                                 $SIG_ELEM_NATIVE_INT_VALUE, nqp::null(), nqp::captureposarg_i($capture, $cur_pos_arg), 0.0, '');
                         }
                         elsif $got_prim == 2 {
-                            $bind_fail := bind_one_param($lexpad, $sig, $param, $no_nom_type_check, $error,
+                            $bind_fail := bind_one_param($lexpad, $sig, $param, $no_param_type_check, $error,
                                 $SIG_ELEM_NATIVE_NUM_VALUE, nqp::null(), 0, nqp::captureposarg_n($capture, $cur_pos_arg), '');
                         }
                         else {
-                            $bind_fail := bind_one_param($lexpad, $sig, $param, $no_nom_type_check, $error,
+                            $bind_fail := bind_one_param($lexpad, $sig, $param, $no_param_type_check, $error,
                                 $SIG_ELEM_NATIVE_STR_VALUE, nqp::null(), 0, 0.0, nqp::captureposarg_s($capture, $cur_pos_arg));
                         }
                         return $bind_fail if $bind_fail;
@@ -828,7 +803,7 @@ my class Binder {
                         # if not, we're screwed. Note that we never nominal type check
                         # an optional with no value passed.
                         if $flags +& $SIG_ELEM_IS_OPTIONAL {
-                            $bind_fail := bind_one_param($lexpad, $sig, $param, $no_nom_type_check, $error,
+                            $bind_fail := bind_one_param($lexpad, $sig, $param, $no_param_type_check, $error,
                                 0, handle_optional($param, $flags, $lexpad), 0, 0.0, '');
                             return $bind_fail if $bind_fail;
                         }
@@ -848,16 +823,15 @@ my class Binder {
                 my $value := nqp::null();
                 if $named_args {
                     my int $num_names := nqp::elems($named_names);
-                    my int $j := 0;
+                    my int $j := -1;
                     my str $cur_name;
-                    while $j < $num_names {
+                    while ++$j < $num_names {
                         $cur_name := nqp::atpos_s($named_names, $j);
                         $value := nqp::atkey($named_args, $cur_name);
                         unless nqp::isnull($value) {
                             nqp::deletekey($named_args, $cur_name);
                             $j := $num_names;
                         }
-                        ++$j;
                     }
                 }
 
@@ -865,7 +839,7 @@ my class Binder {
                 if nqp::isnull($value) {
                     # Nope. We'd better hope this param was optional...
                     if $flags +& $SIG_ELEM_IS_OPTIONAL {
-                        $bind_fail := bind_one_param($lexpad, $sig, $param, $no_nom_type_check, $error,
+                        $bind_fail := bind_one_param($lexpad, $sig, $param, $no_param_type_check, $error,
                             0, handle_optional($param, $flags, $lexpad), 0, 0.0, '');
                     }
                     elsif !$suppress_arity_fail {
@@ -877,7 +851,7 @@ my class Binder {
                     }
                 }
                 else {
-                    $bind_fail := bind_one_param($lexpad, $sig, $param, $no_nom_type_check, $error,
+                    $bind_fail := bind_one_param($lexpad, $sig, $param, $no_param_type_check, $error,
                         0, $value, 0, 0.0, '');
                 }
 
@@ -917,8 +891,8 @@ my class Binder {
         return $BIND_RESULT_OK;
     }
 
-    method bind($capture, $sig, $lexpad, int $no_nom_type_check, $error) {
-        bind($capture, $sig, $lexpad, $no_nom_type_check, $error);
+    method bind($capture, $sig, $lexpad, int $no_param_type_check, $error) {
+        bind($capture, $sig, $lexpad, $no_param_type_check, $error);
     }
 
     method bind_sig($capture) {
@@ -934,9 +908,9 @@ my class Binder {
             if $bind_res == $BIND_RESULT_JUNCTION {
                 my @pos_args;
                 my int $num_pos_args := nqp::captureposelems($capture);
-                my int $k := 0;
+                my int $k := -1;
                 my int $got_prim;
-                while $k < $num_pos_args {
+                while ++$k < $num_pos_args {
                     $got_prim := nqp::captureposprimspec($capture, $k);
                     if $got_prim == 0 {
                         nqp::push(@pos_args, nqp::captureposarg($capture, $k));
@@ -950,7 +924,6 @@ my class Binder {
                     else {
                         nqp::push(@pos_args, nqp::box_s(nqp::captureposarg_s($capture, $k), Str));
                     }
-                    ++$k;
                 }
                 my %named_args := nqp::capturenamedshash($capture);
                 return Junction.AUTOTHREAD($caller,
@@ -1017,10 +990,9 @@ my class Binder {
         # Walk through the signature and consider the parameters.
         my int $num_pos_args := nqp::elems($args);
         my int $cur_pos_arg  := 0;
-        my int $i            := 0;
-        while $i < $num_params {
+        my int $i            := -1;
+        while ++$i < $num_params {
             my $param := @params[$i];
-            ++$i;
 
             # If the parameter is anything other than a boring old
             # positional parameter, we won't analyze it and will bail out,
@@ -1047,7 +1019,7 @@ my class Binder {
             unless nqp::isnull(nqp::getattr($param, Parameter, '@!type_captures')) {
                 return $TRIAL_BIND_NOT_SURE;
             }
-            unless nqp::isnull(nqp::getattr($param, Parameter, '$!coerce_type')) {
+            if $param.coercive {
                 return $TRIAL_BIND_NOT_SURE;
             }
 
@@ -1095,8 +1067,8 @@ my class Binder {
                                $got_prim == 2 ?? Num !!
                                $got_prim == 3 ?? Str !!
                                $args[$cur_pos_arg];
-                    my $nom_type := nqp::getattr($param, Parameter, '$!nominal_type');
-                    unless $nom_type =:= Mu || nqp::istype($arg, $nom_type) {
+                    my $param_type := nqp::getattr($param, Parameter, '$!type');
+                    unless $param_type =:= Mu || nqp::istype($arg, $param_type) {
                         # If it failed because we got a junction, may auto-thread;
                         # hand back 'not sure' for now.
                         if $arg.WHAT =:= Junction {
@@ -1108,7 +1080,7 @@ my class Binder {
                         # which would include Int. However, the Int ~~ Str case can be
                         # rejected now, as there's no way it'd ever match. Basically, we
                         # just flip the type check around.
-                        return nqp::istype($nom_type, $arg.WHAT)
+                        return nqp::istype($param_type, $arg.WHAT)
                             ?? $TRIAL_BIND_NOT_SURE
                             !! $TRIAL_BIND_NO_WAY;
                     }
@@ -1412,7 +1384,7 @@ BEGIN {
     #     has int $!associative_delegate;
     #     has Mu $!why;
     #     has Mu $!container_initializer;
-    #     has Attribute $!orig; # original attribute object used for instantiation
+    #     has Attribute $!original; # original attribute object used for instantiation
     Attribute.HOW.add_parent(Attribute, Any);
     Attribute.HOW.add_attribute(Attribute, BOOTSTRAPATTR.new(:name<$!name>, :type(str), :package(Attribute)));
     # The existence of both $!rw and $!ro might be confusing, but they're needed for late trait application with
@@ -1656,7 +1628,13 @@ BEGIN {
                 $val := $desc.default if nqp::eqaddr($val.WHAT, Nil);
                 my $type := $desc.of;
                 if nqp::eqaddr($type, Mu) || nqp::istype($val, $type) {
-                    nqp::bindattr($cont, Scalar, '$!value', $val);
+                    if $type.HOW.archetypes.coercive {
+                        my $coercion_type := $type.HOW.wrappee($type, :coercion);
+                        nqp::bindattr($cont, Scalar, '$!value', $coercion_type.HOW.coerce($coercion_type, $val));
+                    }
+                    else {
+                        nqp::bindattr($cont, Scalar, '$!value', $val);
+                    }
                     unless nqp::eqaddr($desc.WHAT, ContainerDescriptor) ||
                            nqp::eqaddr($desc.WHAT, ContainerDescriptor::Untyped) {
                         $desc.assigned($cont);
@@ -1893,10 +1871,8 @@ BEGIN {
     #     has @!named_names
     #     has @!type_captures
     #     has int $!flags
-    #     has Mu $!nominal_type
+    #     has Mu $!type
     #     has @!post_constraints
-    #     has Mu $!coerce_type
-    #     has str $!coerce_method
     #     has Signature $!sub_signature
     #     has Code $!default_value
     #     has Mu $!container_descriptor;
@@ -1907,10 +1883,8 @@ BEGIN {
     Parameter.HOW.add_attribute(Parameter, scalar_attr('@!named_names', Mu, Parameter, :!auto_viv_container));
     Parameter.HOW.add_attribute(Parameter, scalar_attr('@!type_captures', Mu, Parameter, :!auto_viv_container));
     Parameter.HOW.add_attribute(Parameter, Attribute.new(:name<$!flags>, :type(int), :package(Parameter)));
-    Parameter.HOW.add_attribute(Parameter, Attribute.new(:name<$!nominal_type>, :type(Mu), :package(Parameter)));
+    Parameter.HOW.add_attribute(Parameter, Attribute.new(:name<$!type>, :type(Mu), :package(Parameter)));
     Parameter.HOW.add_attribute(Parameter, scalar_attr('@!post_constraints', List, Parameter, :!auto_viv_container));
-    Parameter.HOW.add_attribute(Parameter, scalar_attr('$!coerce_type', Mu, Parameter, :!auto_viv_container));
-    Parameter.HOW.add_attribute(Parameter, Attribute.new(:name<$!coerce_method>, :type(str), :package(Parameter)));
     Parameter.HOW.add_attribute(Parameter, scalar_attr('$!sub_signature', Signature, Parameter, :!auto_viv_container));
     Parameter.HOW.add_attribute(Parameter, scalar_attr('$!default_value', Code, Parameter, :!auto_viv_container));
     Parameter.HOW.add_attribute(Parameter, scalar_attr('$!container_descriptor', Mu, Parameter, :!auto_viv_container));
@@ -1918,16 +1892,17 @@ BEGIN {
     Parameter.HOW.add_attribute(Parameter, Attribute.new(:name<$!why>, :type(Mu), :package(Parameter)));
     Parameter.HOW.add_method(Parameter, 'is_generic', nqp::getstaticcode(sub ($self) {
             # If nonimnal type or attr_package is generic, so are we.
-            my $type := nqp::getattr($self, Parameter, '$!nominal_type');
+            my $type := nqp::getattr($self, Parameter, '$!type');
             my $ap   := nqp::getattr($self, Parameter, '$!attr_package');
             nqp::hllboolfor($type.HOW.archetypes.generic ||
                 (!nqp::isnull($ap) && $ap.HOW.archetypes.generic), "Raku")
         }));
     Parameter.HOW.add_method(Parameter, 'instantiate_generic', nqp::getstaticcode(sub ($self, $type_environment) {
             # Clone with the type instantiated.
-            my $SIG_ELEM_NOMINAL_GENERIC := 524288;
+            my int $SIG_ELEM_TYPE_GENERIC := 524288;
+            my int $SIG_ELEM_IS_COERCIVE  := 67108864;
             my $ins      := nqp::clone($self);
-            my $type     := nqp::getattr($self, Parameter, '$!nominal_type');
+            my $type     := nqp::getattr($self, Parameter, '$!type');
             my $cd       := nqp::getattr($self, Parameter, '$!container_descriptor');
             my $ap       := nqp::getattr($self, Parameter, '$!attr_package');
             my $ins_type := $type;
@@ -1936,17 +1911,21 @@ BEGIN {
                 $ins_type := $type.HOW.instantiate_generic($type, $type_environment);
                 $ins_cd   := nqp::isnull($cd) ?? $cd !! $cd.instantiate_generic($type_environment);
             }
-            my $ins_ap := !nqp::isnull($ap) && $ap.HOW.archetypes.generic
-                ?? $ap.HOW.instantiate_generic($ap, $type_environment)
-                !! $ap;
+            my $ins_ap :=
+                !nqp::isnull($ap) && $ap.HOW.archetypes.generic
+                    ?? $ap.HOW.instantiate_generic($ap, $type_environment)
+                    !! $ap;
+            my int $flags := nqp::getattr_i($ins, Parameter, '$!flags');
             unless $ins_type.HOW.archetypes.generic {
-                my int $flags := nqp::getattr_i($ins, Parameter, '$!flags');
-                if $flags +& $SIG_ELEM_NOMINAL_GENERIC {
-                    nqp::bindattr_i($ins, Parameter, '$!flags',
-                        $flags - $SIG_ELEM_NOMINAL_GENERIC)
+                if $flags +& $SIG_ELEM_TYPE_GENERIC {
+                    nqp::bindattr_i($ins, Parameter, '$!flags', $flags - $SIG_ELEM_TYPE_GENERIC);
                 }
             }
-            nqp::bindattr($ins, Parameter, '$!nominal_type', $ins_type);
+            my $archetypes := $ins_type.HOW.archetypes;
+            if nqp::can($archetypes, 'coercive') && $archetypes.coercive {
+                nqp::bindattr_i($ins, Parameter, '$!flags', $flags +| $SIG_ELEM_IS_COERCIVE);
+            }
+            nqp::bindattr($ins, Parameter, '$!type', $ins_type);
             nqp::bindattr($ins, Parameter, '$!container_descriptor', $ins_cd);
             nqp::bindattr($ins, Parameter, '$!attr_package', $ins_ap);
             $ins
@@ -2015,15 +1994,6 @@ BEGIN {
             }
             $dcself
         }));
-    Parameter.HOW.add_method(Parameter, 'set_coercion', nqp::getstaticcode(sub ($self, $type) {
-            my $dcself := nqp::decont($self);
-            nqp::bindattr_s($dcself, Parameter, '$!coerce_method',
-              nqp::istype($type.HOW, Perl6::Metamodel::DefiniteHOW)
-              ?? $type.HOW.base_type($type).HOW.name($type.HOW.base_type: $type)
-              !! $type.HOW.name($type));
-            nqp::bindattr($dcself, Parameter, '$!coerce_type', nqp::decont($type));
-            $dcself
-        }));
     Parameter.HOW.add_method(Parameter, 'WHY', nqp::getstaticcode(sub ($self) {
             my $why := nqp::getattr(nqp::decont($self), Parameter, '$!why');
             if nqp::isnull($why) || !$why {
@@ -2032,6 +2002,10 @@ BEGIN {
                 $why.set_docee($self);
                 $why
             }
+        }));
+    Parameter.HOW.add_method(Parameter, 'coercive', nqp::getstaticcode(sub ($self) {
+            #my int $SIG_ELEM_IS_COERCIVE  := 67108864;
+            nqp::if(nqp::bitand_i(nqp::getattr(nqp::decont($self), Parameter, '$!flags'), 67108864), 1, 0)
         }));
     Parameter.HOW.compose_repr(Parameter);
 
@@ -2145,43 +2119,39 @@ BEGIN {
                 my %pclone := nqp::clone($phasers);
                 if $next {
                     my @nexts := nqp::clone($phasers<NEXT>);
-                    my int $i := 0;
-                    while $i < nqp::elems(@nexts) {
+                    my int $i := -1;
+                    while ++$i < nqp::elems(@nexts) {
                         @nexts[$i] := @nexts[$i].clone();
-                        ++$i;
                     }
                     %pclone<NEXT> := @nexts;
                 }
                 if $last {
                     my @lasts := nqp::clone($phasers<LAST>);
-                    my int $i := 0;
-                    while $i < nqp::elems(@lasts) {
+                    my int $i := -1;
+                    while ++$i < nqp::elems(@lasts) {
                         nqp::captureinnerlex(nqp::getattr(
                             (@lasts[$i] := @lasts[$i].clone()),
                             Code, '$!do'));
-                        ++$i;
                     }
                     %pclone<LAST> := @lasts;
                 }
                 if $quit {
                     my @quits := nqp::clone($phasers<QUIT>);
-                    my int $i := 0;
-                    while $i < nqp::elems(@quits) {
+                    my int $i := -1;
+                    while ++$i < nqp::elems(@quits) {
                         nqp::captureinnerlex(nqp::getattr(
                             (@quits[$i] := @quits[$i].clone()),
                             Code, '$!do'));
-                        ++$i;
                     }
                     %pclone<QUIT> := @quits;
                 }
                 if $close {
                     my @closes := nqp::clone($phasers<CLOSE>);
-                    my int $i := 0;
-                    while $i < nqp::elems(@closes) {
+                    my int $i := -1;
+                    while ++$i < nqp::elems(@closes) {
                         nqp::captureinnerlex(nqp::getattr(
                             (@closes[$i] := @closes[$i].clone()),
                             Code, '$!do'));
-                        ++$i;
                     }
                     %pclone<CLOSE> := @closes;
                 }
@@ -2196,34 +2166,30 @@ BEGIN {
             if nqp::isconcrete($phasers) {
                 my @next := nqp::atkey($phasers, 'NEXT');
                 if nqp::islist(@next) {
-                    my int $i := 0;
-                    while $i < nqp::elems(@next) {
+                    my int $i := -1;
+                    while ++$i < nqp::elems(@next) {
                         nqp::p6capturelexwhere(@next[$i]);
-                        ++$i;
                     }
                 }
                 my @last := nqp::atkey($phasers, 'LAST');
                 if nqp::islist(@last) {
-                    my int $i := 0;
-                    while $i < nqp::elems(@last) {
+                    my int $i := -1;
+                    while ++$i < nqp::elems(@last) {
                         nqp::p6capturelexwhere(@last[$i]);
-                        ++$i;
                     }
                 }
                 my @quit := nqp::atkey($phasers, 'QUIT');
                 if nqp::islist(@quit) {
-                    my int $i := 0;
-                    while $i < nqp::elems(@quit) {
+                    my int $i := -1;
+                    while ++$i < nqp::elems(@quit) {
                         nqp::p6capturelexwhere(@quit[$i]);
-                        ++$i;
                     }
                 }
                 my @close := nqp::atkey($phasers, 'CLOSE');
                 if nqp::islist(@close) {
-                    my int $i := 0;
-                    while $i < nqp::elems(@close) {
+                    my int $i := -1;
+                    while ++$i < nqp::elems(@close) {
                         nqp::p6capturelexwhere(@close[$i]);
-                        ++$i;
                     }
                 }
             }
@@ -2319,7 +2285,7 @@ BEGIN {
             my int $SIG_ELEM_IS_CAPTURE          := 32768;
             my int $SIG_ELEM_UNDEFINED_ONLY      := 65536;
             my int $SIG_ELEM_DEFINED_ONLY        := 131072;
-            my int $SIG_ELEM_NOMINAL_GENERIC     := 524288;
+            my int $SIG_ELEM_TYPE_GENERIC        := 524288;
             my int $SIG_ELEM_NATIVE_INT_VALUE    := 2097152;
             my int $SIG_ELEM_NATIVE_NUM_VALUE    := 4194304;
             my int $SIG_ELEM_NATIVE_STR_VALUE    := 8388608;
@@ -2347,10 +2313,10 @@ BEGIN {
                 }
 
                 # Analyse each parameter in the two candidates.
-                my int $i := 0;
                 my int $narrower := 0;
                 my int $tied := 0;
-                while $i < $types_to_check {
+                my int $i := -1;
+                while ++$i < $types_to_check {
                     my $type_obj_a := %a<types>[$i];
                     my $type_obj_b := %b<types>[$i];
                     if nqp::eqaddr($type_obj_a, $type_obj_b) {
@@ -2390,7 +2356,6 @@ BEGIN {
                             }
                         }
                     }
-                    ++$i;
                 }
 
                 # If one is narrower than the other from current analysis, we're done.
@@ -2490,14 +2455,19 @@ BEGIN {
                     }
 
                     # Record type info for this parameter.
-                    if $flags +& $SIG_ELEM_NOMINAL_GENERIC {
+                    if $flags +& $SIG_ELEM_TYPE_GENERIC {
                         %info<bind_check> := 1;
                         %info<constrainty> := 1;
                         %info<types>[$significant_param] := Any;
                     }
                     else {
-                        %info<types>[$significant_param] :=
-                            nqp::getattr($param, Parameter, '$!nominal_type');
+                        my $ptype :=
+                            nqp::getattr($param, Parameter, '$!type');
+                        if $ptype.HOW.archetypes.coercive {
+                            my $coercion_type := $ptype.HOW.wrappee($ptype, :coercion);
+                            $ptype := $coercion_type.HOW.constraint_type($coercion_type);
+                        }
+                        %info<types>[$significant_param] := $ptype;
                     }
                     unless nqp::isnull(nqp::getattr($param, Parameter, '@!post_constraints')) {
                         %info<constraints>[$significant_param] := 1;
@@ -2529,10 +2499,10 @@ BEGIN {
 
                     # Keep track of coercion types; they'll need an extra entry
                     # in the things we sort.
-                    my $coerce_type := nqp::getattr($param, Parameter, '$!coerce_type');
-                    unless nqp::isnull($coerce_type) {
+                    if $param.coercive {
                         nqp::push(@coerce_type_idxs, $significant_param);
-                        nqp::push(@coerce_type_objs, $coerce_type);
+                        my $param_type := nqp::getattr($param, Parameter, '$!type');
+                        nqp::push(@coerce_type_objs, $param_type.HOW.target_type($param_type));
                     }
 
                     ++$significant_param;
@@ -2570,12 +2540,12 @@ BEGIN {
 
             # Now analyze type narrowness of the candidates relative to each
             # other and create the edges.
-            my int $i := 0;
             my int $j;
             my int $n := nqp::elems(@graph);
-            while $i < $n {
-                $j := 0;
-                while $j < $n {
+            my int $i := -1;
+            while ++$i < $n {
+                $j := -1;
+                while ++$j < $n {
                     unless $i == $j {
                         if is_narrower(@graph[$i]<info>, @graph[$j]<info>) {
                             @graph[$i]<edges>[@graph[$i]<edges_out>] := @graph[$j];
@@ -2583,9 +2553,7 @@ BEGIN {
                             ++@graph[$j]<edges_in>;
                         }
                     }
-                    ++$j;
                 }
-                ++$i;
             }
 
             # Perform the topological sort.
@@ -2596,15 +2564,14 @@ BEGIN {
 
                 # Find any nodes that have no incoming edges and add them to
                 # results.
-                $i := 0;
-                while $i < $n {
+                $i := -1;
+                while ++$i < $n {
                     if @graph[$i]<edges_in> == 0 {
                         # Add to results.
                         nqp::push(@result, @graph[$i]<info>);
                         --$candidates_to_sort;
                         @graph[$i]<edges_in> := $EDGE_REMOVAL_TODO;
                     }
-                    ++$i;
                 }
                 if $rem_results == nqp::elems(@result) {
                     nqp::die("Circularity detected in multi sub types" ~ ($self.name ?? " for &" ~ $self.name !! ''));
@@ -2612,17 +2579,15 @@ BEGIN {
 
                 # Now we need to decrement edges in counts for things that had
                 # edges from candidates we added here.
-                $i := 0;
-                while $i < $n {
+                $i := -1;
+                while ++$i < $n {
                     if @graph[$i]<edges_in> == $EDGE_REMOVAL_TODO {
-                        $j := 0;
-                        while $j < @graph[$i]<edges_out> {
+                        $j := -1;
+                        while ++$j < @graph[$i]<edges_out> {
                             --@graph[$i]<edges>[$j]<edges_in>;
-                            ++$j;
                         }
                         @graph[$i]<edges_in> := $EDGE_REMOVED;
                     }
-                    ++$i;
                 }
 
                 # This is end of a tied group, so leave a gap.
@@ -2695,8 +2660,8 @@ BEGIN {
                         $type_mismatch := 0;
                         $rwness_mismatch := 0;
 
-                        $i := 0;
-                        while $i < $type_check_count && !$type_mismatch && !$rwness_mismatch {
+                        $i := -1;
+                        while ++$i < $type_check_count && !$type_mismatch && !$rwness_mismatch {
                             my $type_obj       := nqp::atpos(nqp::atkey($cur_candidate, 'types'), $i);
                             my int $type_flags := nqp::atpos_i(nqp::atkey($cur_candidate, 'type_flags'), $i);
                             my int $got_prim   := nqp::captureposprimspec($capture, $i);
@@ -2765,7 +2730,6 @@ BEGIN {
                                     }
                                 }
                             }
-                            ++$i;
                         }
 
                         unless $type_mismatch || $rwness_mismatch {
@@ -2781,8 +2745,8 @@ BEGIN {
                     if nqp::elems(@possibles) {
                         my $new_possibles;
                         my %info;
-                        $i := 0;
-                        while $i < nqp::elems(@possibles) {
+                        $i := -1;
+                        while ++$i < nqp::elems(@possibles) {
                             %info := nqp::atpos(@possibles, $i);
 
                             # First, if there's a required named parameter and it was
@@ -2838,7 +2802,6 @@ BEGIN {
                             else {
                                 $new_possibles := [nqp::atpos(@possibles, $i)];
                             }
-                            ++$i;
                         }
 
                         # If we have an updated list of possibles, use this
@@ -2944,15 +2907,14 @@ BEGIN {
             my $junctional_res;
             if nqp::elems(@possibles) == 0 {
                 my int $has_junc_args := 0;
-                $i := 0;
-                while $i < $num_args {
+                $i := -1;
+                while ++$i < $num_args {
                     if !nqp::captureposprimspec($capture, $i) {
                         my $arg := nqp::captureposarg($capture, $i);
                         if nqp::istype($arg, Junction) && nqp::isconcrete($arg) {
                             $has_junc_args := 1;
                         }
                     }
-                    ++$i;
                 }
                 if $has_junc_args {
                     $junctional_res := -> *@pos, *%named {
@@ -3086,8 +3048,8 @@ BEGIN {
                     !! nqp::atkey($cur_candidate, 'num_types');
                 $type_mismatch := 0;
                 $type_match_possible := 1;
-                $i := 0;
-                while $i < $type_check_count {
+                $i := -1;
+                while ++$i < $type_check_count {
                     my int $type_flags := nqp::atpos_i(nqp::atkey($cur_candidate, 'type_flags'), $i);
                     my int $got_prim   := nqp::atpos(@flags, $i) +& 0xF;
                     if $type_flags +& $TYPE_NATIVE_MASK {
@@ -3153,7 +3115,6 @@ BEGIN {
                             $used_defcon := 1;
                         }
                     }
-                    ++$i;
                 }
                 if $type_match_possible {
                     $type_possible := 1;
@@ -3319,11 +3280,10 @@ BEGIN {
             my int $n := nqp::elems(@!pos-capture-counts);
             if $n > 0 {
                 my $result := nqp::list();
-                my int $i := 0;
-                while $i < $n {
+                my int $i := -1;
+                while ++$i < $n {
                     nqp::bindpos($result, $i, nqp::create(Array))
                         if nqp::atpos_i(@!pos-capture-counts, $i) >= 2;
-                    $i++;
                 }
                 $result
             }
@@ -3344,14 +3304,13 @@ BEGIN {
             my int $n := nqp::elems(@!named-capture-counts);
             if $n > 0 {
                 my $result := nqp::hash();
-                my int $i := 0;
-                while $i < $n {
+                my int $i := -1;
+                while ++$i < $n {
                     if nqp::atpos_i(@!named-capture-counts, $i) >= 2 {
                         nqp::bindkey($result,
                             nqp::atpos_s(@!named-capture-names, $i),
                             nqp::create(Array));
                     }
-                    $i++;
                 }
                 $result
             }
@@ -3375,11 +3334,10 @@ BEGIN {
             my int $n := nqp::elems(@!pos-capture-counts);
             if $n > 0 {
                 my $result := nqp::list();
-                my int $i := 0;
-                while $i < $n {
+                my int $i := -1;
+                while ++$i < $n {
                     nqp::bindpos($result, $i, nqp::list())
                         if nqp::atpos_i(@!pos-capture-counts, $i) >= 2;
-                    $i++;
                 }
                 $result
             }
@@ -3394,14 +3352,13 @@ BEGIN {
             my int $n := nqp::elems(@!named-capture-counts);
             if $n > 0 {
                 my $result := nqp::hash();
-                my int $i := 0;
-                while $i < $n {
+                my int $i := -1;
+                while ++$i < $n {
                     if nqp::atpos_i(@!named-capture-counts, $i) >= 2 {
                         nqp::bindkey($result,
                             nqp::atpos_s(@!named-capture-names, $i),
                             nqp::list());
                     }
-                    $i++;
                 }
                 $result
             }
@@ -3647,27 +3604,36 @@ BEGIN {
                 $self.CALL-ME(|@pos, |%named)
             }
             else {
-                if !nqp::isconcrete($self) {
-                    my $coercer_name := $self.HOW.name($self);
-                    nqp::die("Cannot coerce to $coercer_name with named arguments")
-                      if +%named;
+                my $self_name := $self.HOW.name($self);
+                if !nqp::isconcrete($self) && +@pos {
+                    my $val;
                     if +@pos == 1 {
-                        nqp::hllizefor(@pos[0]."$coercer_name"(), 'Raku')
+                        $val := @pos[0];
                     }
                     else {
-                        my $list := nqp::create(List);
-                        nqp::bindattr($list, List, '$!reified', @pos);
-                        nqp::hllizefor($list."$coercer_name"(), 'Raku')
+                        $val := nqp::create(List);
+                        nqp::bindattr($val, List, '$!reified', @pos);
                     }
+                    Perl6::Metamodel::Configuration.throw_or_die(
+                        'X::Coerce::Impossible',
+                        "Cannot coerce to $self_name with named arguments",
+                        :target-type($self.WHAT), :from-type($val.WHAT), :hint("named arguments passed")
+                    ) if +%named;
+                    my $how := $self.HOW;
+                    my $coercion_type := Perl6::Metamodel::CoercionHOW.new_type(
+                        (nqp::istype($how, Perl6::Metamodel::ClassHOW) && $how.is_pun($self)
+                            ?? $self.HOW.pun_source($self)
+                            !! $self.WHAT),
+                        $val.WHAT);
+                    nqp::hllizefor($coercion_type.HOW.coerce($coercion_type, $val), "Raku");
                 }
                 else {
-                    my %ex := nqp::gethllsym('Raku', 'P6EX');
-                    if nqp::isnull(%ex) || !nqp::existskey(%ex, 'X::Method::NotFound') {
-                        nqp::die("No such method 'CALL-ME' for invocant of type '" ~ $self.HOW.name($self) ~ "'");
-                    }
-                    else {
-                        nqp::atkey(%ex, 'X::Method::NotFound')($self, 'CALL-ME', $self.HOW.name($self))
-                    }
+                    Perl6::Metamodel::Configuration.throw_or_die(
+                        'X::Method::NotFound',
+                        "No such method 'CALL-ME' for invocant of type '$self_name'",
+                        :invocant($self), :method(nqp::hllizefor('CALL-ME', "Raku")),
+                        :typename(nqp::hllizefor($self_name, "Raku"))
+                    );
                 }
             }
         });
@@ -3903,9 +3869,9 @@ nqp::sethllconfig('Raku', nqp::hash(
             if $bind_res == 2 {
                 my @pos_args;
                 my int $num_pos_args := nqp::captureposelems($capture);
-                my int $k := 0;
                 my int $got_prim;
-                while $k < $num_pos_args {
+                my int $k := -1;
+                while ++$k < $num_pos_args {
                     $got_prim := nqp::captureposprimspec($capture, $k);
                     if $got_prim == 0 {
                         nqp::push(@pos_args, nqp::captureposarg($capture, $k));
@@ -3919,7 +3885,6 @@ nqp::sethllconfig('Raku', nqp::hash(
                     else {
                         nqp::push(@pos_args, nqp::box_s(nqp::captureposarg_s($capture, $k), Str));
                     }
-                    ++$k;
                 }
                 my %named_args := nqp::capturenamedshash($capture);
                 Junction.AUTOTHREAD($caller,
@@ -3935,6 +3900,7 @@ nqp::sethllconfig('Raku', nqp::hash(
         }
     },
     'method_not_found_error', -> $obj, str $name {
+        my $class := nqp::getlexcaller('$?CLASS');
         if nqp::gethllsym('Raku', 'P6EX') -> %ex {
             if $name eq 'STORE' {
                 if nqp::atkey(%ex,'X::Assignment::RO') -> $thrower {
@@ -3942,7 +3908,7 @@ nqp::sethllconfig('Raku', nqp::hash(
                 }
             }
             elsif nqp::atkey(%ex,'X::Method::NotFound') -> $thrower {
-                $thrower($obj, $name, $obj.HOW.name($obj));
+                $thrower($obj, $name, $obj.HOW.name($obj), :in-class-call(nqp::eqaddr(nqp::what($obj), $class)));
             }
         }
 
@@ -4035,8 +4001,14 @@ Perl6::Metamodel::PackageHOW.pretend_to_be([Any, Mu]);
 Perl6::Metamodel::PackageHOW.delegate_methods_to(Any);
 Perl6::Metamodel::ModuleHOW.pretend_to_be([Any, Mu]);
 Perl6::Metamodel::ModuleHOW.delegate_methods_to(Any);
-Perl6::Metamodel::CoercionHOW.pretend_to_be([Any, Mu]);
-Perl6::Metamodel::CoercionHOW.delegate_methods_to(Any);
+
+# Make roles handle invocations.
+my $role_invoke_handler := nqp::getstaticcode(sub ($self, *@pos, *%named) {
+    $self.HOW.pun($self)(|@pos, |%named)
+});
+Perl6::Metamodel::ParametricRoleGroupHOW.set_default_invoke_handler($role_invoke_handler);
+Perl6::Metamodel::ParametricRoleHOW.set_default_invoke_handler($role_invoke_handler);
+Perl6::Metamodel::CurriedRoleHOW.set_default_invoke_handler($role_invoke_handler);
 
 # Let ClassHOW and EnumHOW know about the invocation handler.
 Perl6::Metamodel::ClassHOW.set_default_invoke_handler(
@@ -4071,4 +4043,4 @@ nqp::gethllsym('Raku', 'JavaModuleLoader').set_interop_loader(-> {
 Perl6::Metamodel::JavaHOW.pretend_to_be([Any, Mu]);
 #?endif
 
-# vim: expandtab shiftwidth=4
+# vim: expandtab sw=4

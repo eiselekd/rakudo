@@ -247,6 +247,9 @@ do {
         }
 
         method new(Mu \compiler, Mu \adverbs) {
+            say compiler.version_string(:shorten-versions);
+            say '';
+
             my $multi-line-enabled = !%*ENV<RAKUDO_DISABLE_MULTILINE>;
             my $self = self.bless();
             $self.init(compiler, $multi-line-enabled);
@@ -400,12 +403,13 @@ do {
         }
 
         method repl-print(Mu $value --> Nil) {
-            nqp::can($value, 'gist')
-              and say $value
+            my $method := %*ENV<RAKU_REPL_OUTPUT_METHOD> // "gist";
+            nqp::can($value,$method)
+              and say $value."$method"()
               or say "(low-level object `$value.^name()`)";
 
             CATCH {
-                default { say $_ }
+                default { say ."$method"() }
             }
         }
 
@@ -439,4 +443,4 @@ do {
     }
 }
 
-# vim: ft=perl6 expandtab sw=4
+# vim: expandtab shiftwidth=4

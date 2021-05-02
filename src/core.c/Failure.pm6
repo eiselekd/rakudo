@@ -8,9 +8,17 @@ my class Failure is Nil {
     has Int $!handled;   # alas, native int breaks on the JVM
 #?endif
 
-    method !SET-SELF($!exception) {
-        $!backtrace = $!exception.backtrace || Backtrace.new(3);
-        $!exception.reset-backtrace;
+    method !SET-SELF(\exception) {
+        $!exception := exception;
+        $!backtrace := exception.backtrace || Backtrace.new(
+#?if !js
+            4
+#?endif
+#?if js
+            5
+#?endif
+        );
+        exception.reset-backtrace;
         self
     }
 
@@ -175,4 +183,4 @@ multi sub die(Failure:U $f --> Nil) {
     X::AdHoc.new(:payload("Died with undefined " ~ $f.^name)).throw;
 }
 
-# vim: ft=perl6 expandtab sw=4
+# vim: expandtab shiftwidth=4

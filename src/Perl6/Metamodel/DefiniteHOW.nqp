@@ -1,6 +1,7 @@
 class Perl6::Metamodel::DefiniteHOW
     #~ does Perl6::Metamodel::Naming
     does Perl6::Metamodel::Documenting
+    does Perl6::Metamodel::Nominalizable
 
     #~ does Perl6::Metamodel::MethodDelegation
     #~ does Perl6::Metamodel::TypePretense
@@ -106,6 +107,11 @@ class Perl6::Metamodel::DefiniteHOW
         $base_type.HOW.find_method($base_type, $name)
     }
 
+    method find_method_qualified($definite_type, $qtype, $name) {
+        my $base_type := self.base_type($definite_type);
+        $base_type.HOW.find_method_qualified($base_type, $qtype, $name)
+    }
+
     # Do check when we're on LHS of smartmatch (e.g. Even ~~ Int).
     method type_check($definite_type, $checkee) {
         my $base_type := self.base_type($definite_type);
@@ -122,11 +128,15 @@ class Perl6::Metamodel::DefiniteHOW
             "Raku"
         )
     }
+
+    # Methods needed by Perl6::Metamodel::Nominalizable
+    method nominalizable_kind() { 'definite' }
+    method !wrappee($obj) { self.base_type($obj) }
 }
 
 BEGIN {
     my $root := nqp::newtype(Perl6::Metamodel::DefiniteHOW, 'Uninstantiable');
-    nqp::settypehll($root, 'Raku');
+    nqp::setdebugtypename(nqp::settypehll($root, 'Raku'), 'DefiniteHOW root');
 
     nqp::setparameterizer($root, sub ($type, $params) {
         # Re-use same HOW.
@@ -135,3 +145,5 @@ BEGIN {
     });
     (Perl6::Metamodel::DefiniteHOW.WHO)<root> := $root;
 }
+
+# vim: expandtab sw=4

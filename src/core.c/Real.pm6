@@ -1,4 +1,5 @@
 my class Complex { ... }
+my class X::Numeric::Uninitialized { ... }
 
 my role Real does Numeric {
     method Rat(Real:D: Real $epsilon = 1.0e-6) { self.Bridge.Rat($epsilon) }
@@ -58,7 +59,7 @@ my role Real does Numeric {
     proto method exp(|) {*}
     multi method exp(Real:D: )           { self.Bridge.exp               }
     method truncate(Real:D:) {
-        self == 0 ?? 0 !! self < 0  ?? self.ceiling !! self.floor
+        self < 0  ?? self.ceiling !! self.floor
     }
     method isNaN { Bool::False }
 
@@ -125,7 +126,13 @@ my role Real does Numeric {
         self.Mu::Real; # issue a warning;
         self.new
     }
-    method Bridge(Real:D:) { self.Num }
+    method Bridge(Real: --> Num:D) {
+        self.defined
+            ?? self.Num
+            !! (self.HOW.archetypes.coercive
+                ?? self.Mu::Numeric.Num
+                !! X::Numeric::Uninitialized.new(:type(self)).throw)
+    }
     method Int(Real:D:) { self.Bridge.Int }
     method Num(Real:D:) { self.Bridge.Num }
     multi method Str(Real:D:) { self.Bridge.Str }
@@ -145,8 +152,6 @@ multi sub infix:</>(Real \a, Real \b)   { a.Bridge / b.Bridge }
 multi sub infix:<%>(Real \a, Real \b)   { a.Bridge % b.Bridge }
 
 multi sub infix:<**>(Real \a, Real \b)  { a.Bridge ** b.Bridge }
-
-multi sub infix:«<=>»(Real \a, Real \b) { a.Bridge <=> b.Bridge }
 
 multi sub infix:<==>(Real \a, Real \b)  { a.Bridge == b.Bridge }
 
@@ -186,4 +191,4 @@ multi sub atan2(     \a,      \b = 1e0) { a.Numeric.atan2(b.Numeric) }
 proto sub unpolar($, $, *%) {*}
 multi sub unpolar(Real $mag, Real $angle) { $mag.unpolar($angle) }
 
-# vim: ft=perl6 expandtab sw=4
+# vim: expandtab shiftwidth=4

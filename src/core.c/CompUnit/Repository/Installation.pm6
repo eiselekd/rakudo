@@ -1,6 +1,6 @@
 class CompUnit::Repository::Installation does CompUnit::Repository::Locally does CompUnit::Repository::Installable {
     has $!lock = Lock.new;
-    has $!cver = nqp::hllize(nqp::atkey(nqp::gethllsym('Raku', '$COMPILER_CONFIG'), 'version'));
+    has $!cver = nqp::hllize(nqp::atkey(nqp::gethllsym('default', 'SysConfig').rakudo-build-config(), 'version'));
     has %!loaded; # cache compunit lookup for self.need(...)
     has %!seen;   # cache distribution lookup for self!matching-dist(...)
     has $!precomp;
@@ -81,7 +81,7 @@ sub MAIN(:$name, :$auth, :$ver, *@, *%) {
 
         for $short-dir.dir -> $dir {
             $dir.add($id).unlink;
-            $dir.rmdir unless $dir.dir;
+            $dir.rmdir unless $dir.dir.elems;
         }
     }
 
@@ -224,7 +224,7 @@ sub MAIN(:$name, :$auth, :$ver, *@, *%) {
             self!add-short-name($name-path, $dist, $id);
             %links{$name-path} = $id;
             my $handle  = $dist.content($file);
-            my $content = $handle.open.slurp-rest(:bin,:close);
+            my $content = $handle.open.slurp(:bin,:close);
             $destination.spurt($content);
             $handle.close;
         }
@@ -237,7 +237,7 @@ sub MAIN(:$name, :$auth, :$ver, *@, *%) {
             my $destination    = $resources-dir.add($id);
             %links{$name-path} = $id;
             my $handle  = $dist.content($file);
-            my $content = $handle.open.slurp-rest(:bin,:close);
+            my $content = $handle.open.slurp(:bin,:close);
             $destination.spurt($content);
             $handle.close;
         }
@@ -429,7 +429,7 @@ sub MAIN(:$name, :$auth, :$ver, *@, *%) {
         }
 
         # Sort from highest to lowest by version and api
-        my $sorted-metas := $matching-metas.sort(*.value<api>).sort(*.value<ver>).reverse;
+        my $sorted-metas := $matching-metas.sort(*.value<ver>).sort(*.value<api>).reverse;
 
         # There is nothing left to do with the subset of meta data, so initialize a lazy distribution with it
         my $distributions := $sorted-metas.map(*.kv).map: -> ($dist-id, $meta) { self!lazy-distribution($dist-id, :$meta) }
@@ -643,4 +643,4 @@ See http://design.raku.org/S22.html#provides for more information.\n";
     }
 }
 
-# vim: ft=perl6 expandtab sw=4
+# vim: expandtab shiftwidth=4

@@ -63,7 +63,7 @@ A Raku Mu when passed to JS land ends up as null
 
 To pass values to Raku land the executed code needs a return.
 
-```perl6
+```raku
 EVAL(:lang<JavaScript>, '123') # This returns Mu
 EVAL(:lang<JavaScript>, 'return 123') # This returns 123
 ```
@@ -79,11 +79,11 @@ offer some methods that Raku expects.
 
 * defined
 
-  Always returns True  
+  Always returns True
 
 * Bool
 
-  Always returns True  
+  Always returns True
 
 * item
 
@@ -93,7 +93,7 @@ offer some methods that Raku expects.
 
   Uses the JavaScript new operator to create an new instance
 
-  ```perl6
+  ```raku
   my $Date = EVAL(:lang<JavaScript>, 'return Date');
   my $instance = $Date.new('December 17, 1995 03:24:00');
   say($instance.getFullYear()); # 1995
@@ -102,7 +102,7 @@ offer some methods that Raku expects.
 
 If the wrapped object has method of that same name you can use an :INTERNAL modifier to access it.
 
-```$obj.new(:INTERNAL, 123)``` 
+```$obj.new(:INTERNAL, 123)```
 | -------------|-------|
 
 This will call a js new method rather then doing ``new $obj(123)```

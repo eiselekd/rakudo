@@ -8,17 +8,14 @@ multi sub infix:<(-)>(QuantHash:D \a) { a     } # Set/Bag/Mix
 multi sub infix:<(-)>(SetHash:D \a)   { a.Set }
 multi sub infix:<(-)>(BagHash:D \a)   { a.Bag }
 multi sub infix:<(-)>(MixHash:D \a)   { a.Mix }
-multi sub infix:<(-)>(Any \a)         { a.Set } # also for Iterable/Map
 
 multi sub infix:<(-)>(Setty:D \a, Setty:D \b) {
-    nqp::if(
-      (my $araw := a.RAW-HASH) && nqp::elems($araw)
-        && (my $braw := b.RAW-HASH) && nqp::elems($braw),
-      nqp::create(a.Setty).SET-SELF(             # both have elems
-        Rakudo::QuantHash.SUB-SET-FROM-SET($araw, $braw)
-      ),
-      a                                          # no elems in a or b
-    )
+    (my $araw := a.RAW-HASH) && nqp::elems($araw)
+      && (my $braw := b.RAW-HASH) && nqp::elems($braw)
+      ?? nqp::create(a.Setty).SET-SELF(             # both have elems
+           Rakudo::QuantHash.SUB-SET-FROM-SET($araw, $braw)
+         )
+      !! a                                          # no elems in a or b
 }
 multi sub infix:<(-)>(Setty:D \a, Map:D \b) {
     nqp::if(
@@ -36,7 +33,7 @@ multi sub infix:<(-)>(Setty:D \a, Map:D \b) {
 multi sub infix:<(-)>(Setty:D \a, Iterable:D \b) {
     nqp::if(
       (my $iterator := b.iterator).is-lazy,
-      Failure.new(X::Cannot::Lazy.new(:action('difference'),:what<set>)),
+      Set.fail-iterator-cannot-be-lazy('set difference'),
       nqp::if(
         (my $raw := a.RAW-HASH) && nqp::elems($raw),
         nqp::create(a.Setty).SET-SELF(                    # elems in b
@@ -92,36 +89,35 @@ multi sub infix:<(-)>(Any $, Failure:D \b) { b.throw }
 multi sub infix:<(-)>(Failure:D \a, Any $) { a.throw }
 multi sub infix:<(-)>(Any \a, Any \b) { infix:<(-)>(a.Set,b.Set) }
 
-multi sub infix:<(-)>(**@p) {
+multi sub infix:<(-)>(+@p) {   # also Any
 
     sub subtract(Mu \elems, Mu \iter, \clone, \value --> Nil) {
-        nqp::stmts(
-          (my $pair := nqp::ifnull(
-            nqp::atkey(elems, nqp::iterkey_s(iter)),
-            nqp::bindkey(
-              elems,
-              nqp::iterkey_s(iter),
-              nqp::if(
-                clone,
-                nqp::p6bindattrinvres(
-                  nqp::clone(nqp::iterval(iter)),
-                  Pair,
-                  '$!value',
-                  0
-                ),
-                Pair.new(nqp::iterval(iter),0)
-              )
+        my $pair := nqp::ifnull(
+          nqp::atkey(elems, nqp::iterkey_s(iter)),
+          nqp::bindkey(
+            elems,
+            nqp::iterkey_s(iter),
+            nqp::if(
+              clone,
+              nqp::p6bindattrinvres(
+                nqp::clone(nqp::iterval(iter)),
+                Pair,
+                '$!value',
+                0
+              ),
+              Pair.new(nqp::iterval(iter),0)
             )
-          )),
-          nqp::bindattr($pair,Pair,'$!value',
-            nqp::getattr($pair,Pair,'$!value') - value
           )
-        )
+        );
+
+        nqp::bindattr($pair,Pair,'$!value',
+          nqp::getattr($pair,Pair,'$!value') - value
+        );
     }
 
     nqp::if(
       (my $params := @p.iterator).is-lazy,
-      Failure.new(X::Cannot::Lazy.new(:action('difference'))),  # bye bye
+      Set.fail-iterator-cannot-be-lazy('set difference'),   # bye bye
 
       nqp::stmts(                                # fixed list of things to diff
         (my $type := nqp::if(
@@ -232,4 +228,4 @@ multi sub infix:<(-)>(**@p) {
 # U+2216 SET MINUS
 my constant &infix:<∖> := &infix:<(-)>;
 
-# vim: ft=perl6 expandtab sw=4
+# vim: expandtab shiftwidth=4

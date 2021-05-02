@@ -3,8 +3,6 @@ my class X::Assignment::RO      { ... }
 my class X::Buf::AsStr          { ... }
 my class X::Buf::Pack           { ... }
 my class X::Buf::Pack::NonASCII { ... }
-my class X::Cannot::Empty       { ... }
-my class X::Cannot::Lazy        { ... }
 my class X::Experimental        { ... }
 
 # externalize the endian indicators
@@ -21,7 +19,7 @@ my role Blob[::T = uint8] does Positional[T] does Stringy is repr('VMArray') is 
     # other then *8 not supported yet
     my int $bpe = try {
 #?if jvm
-        # https://irclog.perlgeek.de/perl6-dev/2017-01-20#i_13961377
+        # https://colabti.org/irclogger/irclogger_log/perl6-dev?date=2017-01-20#l202
         CATCH { default { Nil } }
 #?endif
         (T.^nativesize / 8).Int
@@ -59,14 +57,14 @@ my role Blob[::T = uint8] does Positional[T] does Stringy is repr('VMArray') is 
     multi method STORE(Blob:D: Iterable:D \iterable, :$INITIALIZE) {
         $INITIALIZE
           ?? iterable.is-lazy
-            ?? X::Cannot::Lazy.new(:action<store>,:what(self.^name)).throw
+            ?? self.throw-iterator-cannot-be-lazy('store')
             !! self!push-list("initializ",self,iterable)
           !! X::Assignment::RO.new(:value(self)).throw
     }
     multi method STORE(Blob:D: Any:D \non-iterable, :$INITIALIZE) {
         X::Assignment::RO.new(:value(self)).throw unless $INITIALIZE;
         my int $elems = non-iterable.elems;
-        nqp::push_i(self,non-iterable.AT-POS($_)) for ^$elems; 
+        nqp::push_i(self,non-iterable.AT-POS($_)) for ^$elems;
         self
     }
 
@@ -110,18 +108,14 @@ my role Blob[::T = uint8] does Positional[T] does Stringy is repr('VMArray') is 
     }
 
     multi method AT-POS(Blob:D: int \pos) {
-        nqp::if(
-          (nqp::isge_i(pos,nqp::elems(self)) || nqp::islt_i(pos,0)),
-          self!fail-range(pos),
-          nqp::atpos_i(self,pos)
-        )
+        nqp::isge_i(pos,nqp::elems(self)) || nqp::islt_i(pos,0)
+          ?? self!fail-range(pos)
+          !! nqp::atpos_i(self,pos)
     }
     multi method AT-POS(Blob:D: Int:D \pos) {
-        nqp::if(
-          (nqp::isge_i(pos,nqp::elems(self)) || nqp::islt_i(pos,0)),
-          self!fail-range(pos),
-          nqp::atpos_i(self,pos)
-        )
+        nqp::isge_i(pos,nqp::elems(self)) || nqp::islt_i(pos,0)
+          ?? self!fail-range(pos)
+          !! nqp::atpos_i(self,pos)
     }
 
 #?if moar
@@ -276,7 +270,7 @@ my role Blob[::T = uint8] does Positional[T] does Stringy is repr('VMArray') is 
     multi method Bool(Blob:D:) { nqp::hllbool(nqp::elems(self)) }
     method Capture(Blob:D:) { self.List.Capture }
 
-    multi method elems(Blob:D:)   { nqp::p6box_i(nqp::elems(self)) }
+    multi method elems(Blob:D:) { nqp::elems(self) }
 
     method Numeric(Blob:D:) { nqp::p6box_i(nqp::elems(self)) }
     method Int(Blob:D:)     { nqp::p6box_i(nqp::elems(self)) }
@@ -285,6 +279,9 @@ my role Blob[::T = uint8] does Positional[T] does Stringy is repr('VMArray') is 
 
     method chars(Blob:D:) {
         X::Buf::AsStr.new(object => self, method => 'chars').throw
+    }
+    method codes(Blob:D:) {
+        X::Buf::AsStr.new(object => self, method => 'codes').throw
     }
     multi method Str(Blob:D:) {
         X::Buf::AsStr.new(object => self, method => 'Str'  ).throw
@@ -341,21 +338,41 @@ my role Blob[::T = uint8] does Positional[T] does Stringy is repr('VMArray') is 
         $buffer.List
     }
 
+    my $char := nqp::list_s(
+      '0','1','2','3','4','5','6','7','8','9','A','B','C','D','E','F'
+    );
+
     multi method gist(Blob:D:) {
-        my int $todo = nqp::elems(self) min 100;
-        my $bytes := nqp::list_s;
-        for ^$todo -> int $i {
-            nqp::push_s(
-              $bytes,
-              nqp::if(
-                nqp::isle_i((my int $byte = nqp::atpos_i(self,$i)),15),
-                nqp::concat("0",nqp::base_I(nqp::box_i($byte,Int),16)),
-                nqp::base_I(nqp::box_i($byte,Int),16)
+        my int $todo =
+          nqp::elems(self) min nqp::div_i(200,nqp::div_i(T.^nativesize,4) || 1);
+        my int $i   = -1;
+        my $chunks := nqp::list_s;
+
+        nqp::while(
+          nqp::islt_i($i = nqp::add_i($i,1),$todo),
+          nqp::stmts(
+            (my int $elem   = nqp::atpos_i(self,$i)),
+            (my     $chunk := nqp::list_s),
+            (my int $size   = nqp::div_i(T.^nativesize,4) || 1),
+            nqp::while(
+              nqp::isgt_i($size,0),
+              nqp::stmts(
+                nqp::unshift_s(
+                  $chunk,
+                  nqp::atpos_s($char,nqp::bitand_i($elem,0xF))
+                ),
+                ($elem = nqp::bitshiftr_i($elem,4)),
+                ($size = nqp::sub_i($size,1))
               )
-            )
-        }
-        nqp::push_s($bytes,"...") if nqp::elems(self) > $todo;
-        self.^name ~ ':0x<' ~ nqp::join(" ",$bytes) ~ '>'
+            ),
+            nqp::push_s($chunks,nqp::join('',$chunk))
+          )
+        );
+
+        nqp::push_s($chunks,"...")
+         if nqp::isgt_i(nqp::elems(self),$todo);
+
+        nqp::join('',nqp::list_s(self.^name,':0x<',nqp::join(" ",$chunks),'>'))
     }
     multi method raku(Blob:D:) {
         self.^name ~ '.new(' ~ self.join(',') ~ ')';
@@ -384,15 +401,15 @@ my role Blob[::T = uint8] does Positional[T] does Stringy is repr('VMArray') is 
         )
     }
     sub subbuf-length(\SELF, int $from, int $length, int $elems) {
-        nqp::if(
-          nqp::islt_i($length,0),
-          Failure.new( X::OutOfRange.new(
-            what  => 'Len element to subbuf',
-            got   => $length,
-            range => "0.." ~ $elems
-          )),
-          subbuf-end(SELF, $from, $from + $length - 1, $elems)
-        )
+        nqp::islt_i($length,0)
+          ?? Failure.new(
+               X::OutOfRange.new(
+                 what  => 'Len element to subbuf',
+                 got   => $length,
+                 range => "0.." ~ $elems
+               )
+             )
+          !! subbuf-end(SELF, $from, $from + $length - 1, $elems)
     }
 
     proto method subbuf(|) {*}
@@ -454,13 +471,6 @@ my role Blob[::T = uint8] does Positional[T] does Stringy is repr('VMArray') is 
     multi method subbuf(Blob:D: \from, Numeric \length) {
         length == Inf ?? self.subbuf(from) !! self.subbuf(from,length.Int)
     }
-    multi method subbuf(Blob:D: \from, Any:U) {
-        Rakudo::Deprecations.DEPRECATED(
-          "{self.^name}.subbuf({from}) or {self.^name}.subbuf({from},*)",
-          :what("{self.^name}.subbuf({from},Any)")
-        );
-        self.subbuf(from)
-    }
 
     method reverse(Blob:D:) {
         my int $elems = nqp::elems(self);
@@ -518,12 +528,13 @@ my role Blob[::T = uint8] does Positional[T] does Stringy is repr('VMArray') is 
 
     method join(Blob:D: $delim = '') {
         my int $elems = nqp::elems(self);
-        my $list     := nqp::setelems(nqp::list_s,$elems);
         my int $i     = -1;
+        my $list := nqp::setelems(nqp::setelems(nqp::list_s,$elems),0);
 
-        nqp::bindpos_s($list,$i,
-          nqp::tostr_I(nqp::p6box_i(nqp::atpos_i(self,$i))))
-          while nqp::islt_i(++$i,$elems);
+        nqp::while(
+          nqp::islt_i(($i = nqp::add_i($i,1)),$elems),
+          nqp::push_s($list,nqp::atpos_i(self,$i))
+        );
 
         nqp::join($delim.Str,$list)
     }
@@ -726,13 +737,13 @@ my role Buf[::T = uint8] does Blob[T] is repr('VMArray') is array_type(T) {
     }
     multi method STORE(Buf:D: Iterable:D \iterable) {
         iterable.is-lazy
-          ?? X::Cannot::Lazy.new(:action<store>,:what(self.^name)).throw
+          ?? self.throw-iterator-cannot-be-lazy('store')
           !! self!push-list("initializ",nqp::setelems(self,0),iterable);
     }
     multi method STORE(Buf:D: Any:D \non-iterable) {
         my int $elems = non-iterable.elems;
         nqp::setelems(self,0);
-        nqp::push_i(self,non-iterable.AT-POS($_)) for ^$elems; 
+        nqp::push_i(self,non-iterable.AT-POS($_)) for ^$elems;
         self
     }
 
@@ -945,13 +956,13 @@ my role Buf[::T = uint8] does Blob[T] is repr('VMArray') is array_type(T) {
     multi method pop(Buf:D:) {
         nqp::elems(self)
           ?? nqp::pop_i(self)
-          !! Failure.new(X::Cannot::Empty.new(:action<pop>,:what(self.^name)))
+          !! self.fail-cannot-be-empty('pop')
     }
     proto method shift(|) { * }
     multi method shift(Buf:D:) {
         nqp::elems(self)
           ?? nqp::shift_i(self)
-          !! Failure.new(X::Cannot::Empty.new(:action<shift>,:what(self.^name)))
+          !! self.fail-cannot-be-empty('shift')
     }
 
     method reallocate(Buf:D: Int:D $elements) { nqp::setelems(self,$elements) }
@@ -1045,7 +1056,7 @@ my role Buf[::T = uint8] does Blob[T] is repr('VMArray') is array_type(T) {
 
     method !pend(Buf:D: @values, $action) {
         @values.is-lazy
-          ?? Failure.new(X::Cannot::Lazy.new(:$action,:what(self.^name)))
+          ?? self.fail-iterator-cannot-be-lazy($action)
           !! $action eq 'push' || $action eq 'append'
             ?? self!push-list($action,self,@values)
             !! self!unshift-list($action,self,@values)
@@ -1169,18 +1180,23 @@ multi sub infix:<~^>(Blob:D \a, Blob:D \b) {
     $r
 }
 
-multi sub infix:<eqv>(Blob:D \a, Blob:D \b) {
+multi sub infix:<eqv>(Blob:D \a, Blob:D \b --> Bool:D) {
     nqp::hllbool(
-      nqp::eqaddr(a,b) || (nqp::eqaddr(a.WHAT,b.WHAT) && a.SAME(b))
+      nqp::eqaddr(nqp::decont(a),nqp::decont(b))
+        || (nqp::eqaddr(a.WHAT,b.WHAT) && a.SAME(b))
     )
 }
 
 multi sub infix:<cmp>(Blob:D \a, Blob:D \b) { ORDER(a.COMPARE(b))     }
-multi sub infix:<eq> (Blob:D \a, Blob:D \b) {
-    nqp::hllbool(nqp::eqaddr(a,b) || a.SAME(b))
+multi sub infix:<eq> (Blob:D \a, Blob:D \b --> Bool:D) {
+    nqp::hllbool(
+      nqp::eqaddr(nqp::decont(a),nqp::decont(b)) || a.SAME(b)
+    )
 }
-multi sub infix:<ne> (Blob:D \a, Blob:D \b) {
-    nqp::hllbool(nqp::not_i(nqp::eqaddr(a,b) || a.SAME(b)))
+multi sub infix:<ne> (Blob:D \a, Blob:D \b --> Bool:D) {
+    nqp::hllbool(
+      nqp::not_i(nqp::eqaddr(nqp::decont(a),nqp::decont(b)) || a.SAME(b))
+    )
 }
 multi sub infix:<lt> (Blob:D \a, Blob:D \b) {
     nqp::hllbool(nqp::iseq_i(a.COMPARE(b),-1))
@@ -1206,4 +1222,4 @@ multi sub subbuf-rw(Buf:D \b, $from, $elems) is rw {
     b.subbuf-rw($from, $elems)
 }
 
-# vim: ft=perl6 expandtab sw=4
+# vim: expandtab shiftwidth=4

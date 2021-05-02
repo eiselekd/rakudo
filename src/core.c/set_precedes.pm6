@@ -104,11 +104,9 @@ multi sub infix:<<(<+)>>(Any $, Failure:D $b) { $b.throw }
 multi sub infix:<<(<+)>>(Failure:D $a, Any $) { $a.throw }
 multi sub infix:<<(<+)>>(Any $a, Any $b --> Bool:D) {
     my $*INTERNAL = 1;
-    nqp::if(
-      nqp::istype($a,Mixy) || nqp::istype($b,Mixy),
-      infix:<<(<+)>>($a.Mix, $b.Mix),
-      infix:<<(<+)>>($a.Bag, $b.Bag)
-    )
+    nqp::istype($a,Mixy) || nqp::istype($b,Mixy)
+      ?? infix:<<(<+)>>($a.Mix, $b.Mix)
+      !! infix:<<(<+)>>($a.Bag, $b.Bag)
 }
 
 # U+227C PRECEDES OR EQUAL TO
@@ -135,4 +133,4 @@ multi sub infix:<≽>($a, $b --> Bool:D) {
     infix:<<(<+)>>($b, $a)
 }
 
-# vim: ft=perl6 expandtab sw=4
+# vim: expandtab shiftwidth=4

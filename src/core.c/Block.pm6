@@ -4,7 +4,10 @@ my class Block { # declared in BOOTSTRAP
     #     has Mu $!phasers;
     #     has Mu $!why;
 
-    method of(Block:D:)      { nqp::getattr(self,Code,'$!signature').returns }
+    proto method of() {*}
+    multi method of(Block:U:) { Mu }
+    multi method of(Block:D:) { nqp::getattr(self,Code,'$!signature').returns }
+
     method returns(Block:D:) { nqp::getattr(self,Code,'$!signature').returns }
 
     method add_phaser(Str:D \name, &block --> Nil) {
@@ -27,22 +30,26 @@ my class Block { # declared in BOOTSTRAP
         }
     }
 
-    method fire_if_phasers(Str $name --> Nil) {
-        nqp::if(
-          nqp::attrinited(self,Block,'$!phasers')
-            && nqp::existskey($!phasers,$name),
-          nqp::stmts(
-            (my $iter := nqp::iterator(nqp::atkey($!phasers,$name))),
-            nqp::while($iter,nqp::shift($iter)(),:nohandler)
-          )
-        )
+    method fire_if_phasers(str $name --> Nil) {
+        if nqp::attrinited(self,Block,'$!phasers')
+          && nqp::atkey($!phasers,$name) -> \phasers {
+            my int $i = -1;
+            nqp::while(
+              nqp::islt_i(($i = nqp::add_i($i,1)),nqp::elems(phasers)),
+              nqp::atpos(phasers,$i)(),
+              :nohandler
+            );
+        }
     }
 
-    method fire_phasers(Str $name --> Nil) {
-        nqp::stmts(
-          (my $iter := nqp::iterator(nqp::atkey($!phasers,$name))),
-          nqp::while($iter,nqp::shift($iter)(),:nohandler)
-        )
+    method fire_phasers(str $name --> Nil) {
+        my \phasers := nqp::atkey($!phasers,$name);
+        my int $i    = -1;
+        nqp::while(
+          nqp::islt_i(($i = nqp::add_i($i,1)),nqp::elems(phasers)),
+          nqp::atpos(phasers,$i)(),
+          :nohandler
+        );
     }
 
     method has-phasers() { nqp::hllbool(nqp::attrinited(self,Block,'$!phasers')) }
@@ -79,16 +86,19 @@ my class Block { # declared in BOOTSTRAP
 
     # helper method for array slicing
     multi method POSITIONS(Block:D: Failure:D \failure) { failure }
-    multi method POSITIONS(Block:D $self: Any:D \list) {
-      nqp::if(
-        (nqp::istype(
-          (my \n := nqp::getattr(
-            nqp::getattr($self,Code,'$!signature'),Signature,'$!count')
-          ),Num) && nqp::isnanorinf(n)) || nqp::iseq_i(nqp::unbox_i(n),1),
-        $self(nqp::if(nqp::isconcrete(list),list.elems,0)),
-        $self(|(nqp::if(nqp::isconcrete(list),list.elems,0) xx n))
-      )
+    multi method POSITIONS(Block:D $self: \list) {
+        nqp::isconcrete(list)
+          ?? (nqp::istype(
+               (my \count := nqp::getattr(
+                 nqp::getattr($self,Code,'$!signature'),Signature,'$!count'
+               )),
+               Num
+              ) && nqp::isnanorinf(count)
+             ) || nqp::iseq_i(count,1)
+            ?? $self(list.elems)
+            !! $self(|(list.elems xx count))
+          !! $self(0)
     }
 }
 
-# vim: ft=perl6 expandtab sw=4
+# vim: expandtab shiftwidth=4

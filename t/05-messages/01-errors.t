@@ -2,7 +2,7 @@ use lib <t/packages/>;
 use Test;
 use Test::Helpers;
 
-plan 50;
+plan 51;
 
 # https://github.com/Raku/old-issue-tracker/issues/5707
 throws-like '1++', X::Multi::NoMatch,
@@ -43,17 +43,21 @@ subtest 'chr with large codepoints throws useful error' => {
     plan +@tests;
     for @tests {
         throws-like $^code, Exception,
-            :message{ not .contains('negative') and .contains('codepoint') },
+          :message{
+            .contains('Codepoint')
+            && .contains('out of bounds')
+            && .contains('chr')
+        },
         "$code.raku()";
     }
 }
 
-# https://irclog.perlgeek.de/perl6/2017-03-14#i_14263417
+# https://colabti.org/irclogger/irclogger_log/perl6?date=2017-03-14#l1018
 throws-like ｢m: my @a = for 1..3 <-> { $_ }｣, Exception,
     :message(/«'do for'»/),
     '<-> does not prevent an error suggesting to use `do for`';
 
-# https://irclog.perlgeek.de/perl6-dev/2017-04-13#i_14425133
+# https://colabti.org/irclogger/irclogger_log/perl6-dev?date=2017-04-14#l101
 # https://github.com/Raku/old-issue-tracker/issues/2262
 {
     my $param = '$bar';
@@ -103,11 +107,11 @@ throws-like ｢m: my @a = for 1..3 <-> { $_ }｣, Exception,
 {
     throws-like { sub f(Mu:D $a) {}; f(Int) },
         Exception,
-        message => all(/'Parameter'/, /\W '$a'>>/, /<<'f'>>/, /<<'must be an object instance'>>/, /<<'not a type object'>>/, /<<'Mu'>>/,  /<<'Int'>>/, /\W '.new'>>/),
+        message => all(/Parameter/, /\W '$a'>>/, /<<'f'>>/, /<<must \s+ be \s+ an \s+ object \s+ instance>>/, /<<not \s+ a \s+ type \s+ object>>/, /<<'Mu'>>/,  /<<'Int'>>/, /\W '.new'>>/),
         'types and names shown in the exception message are correct';
     throws-like { sub f(Mu:U $a) {}; f(123) },
         Exception,
-        message => all(/'Parameter'/, /\W '$a'>>/, /<<'f'>>/, /<<'not an object instance'>>/, /<<'must be a type object'>>/, /<<'Mu'>>/,  /<<'Int'>>/, /<<'multi'>>/),
+        message => all(/'Parameter'/, /\W '$a'>>/, /<<'f'>>/, /<<not \s+ an \s+ object \s+ instance>>/, /<<must \s+ be \s+ a \s+ type \s+ object>>/, /<<'Mu'>>/,  /<<'Int'>>/, /<<'multi'>>/),
         'types shown in the exception message are correct';
 }
 
@@ -180,7 +184,7 @@ subtest 'non-ASCII digits > 7 in leading-zero-octal warning' => {
         'wrong arity in a signature mentions the name of the method';
 }
 
-{ # https://irclog.perlgeek.de/perl6-dev/2017-05-31#i_14666102
+{ # https://colabti.org/irclogger/irclogger_log/perl6-dev?date=2017-05-31#l169
     throws-like '42.length      ', Exception, '.length on non-List Cool',
         :message{ .contains: <chars codes>.all & none <elems graphs> };
 
@@ -220,6 +224,11 @@ throws-like { Blob.splice }, X::Multi::NoMatch,
         X::Method::NotFound,
         message => all(/<<"No such private method '!bar'" \W/, /<<'RT123078_2'>>/, /<<'bar'>>/, /<<'baz'>>/),
         'a public method of the same name as the missing private method is suggested';
+    throws-like q| class RT123078_3 { method !bar { }; method baz { } }; RT123078_3.new.bar |,
+        X::Method::NotFound,
+        message => all(/<<"No such method 'bar'" \W/, /<<'RT123078_3'>>/, /\s+ Did \s+ you \s+ mean/),
+        suggestions => <Bag baz>,
+        'a private method of the same name as the public missing method is not suggested for out-of-class call';
     throws-like q| <a a b>.uniq |,
         X::Method::NotFound,
         message => all(/<<"No such method 'uniq'" \W/, /<<'unique'>>/),
@@ -290,4 +299,4 @@ subtest '.new on native types works (deprecated; will die)' => {
 
 #### THIS FILE ALREADY LOTS OF TESTS ADD NEW TESTS TO THE NEXT error.t FILE
 
-# vim: ft=perl6 expandtab sw=4
+# vim: expandtab shiftwidth=4

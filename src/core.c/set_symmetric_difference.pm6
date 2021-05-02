@@ -5,7 +5,6 @@
 proto sub infix:<(^)>(|) is pure {*}
 multi sub infix:<(^)>()               { set() }
 multi sub infix:<(^)>(QuantHash:D \a) { a     } # Set/Bag/Mix
-multi sub infix:<(^)>(Any \a)         { a.Set } # also for Iterable/Map
 
 multi sub infix:<(^)>(Setty:D \a, Setty:D \b) {
     nqp::if(
@@ -172,21 +171,7 @@ multi sub infix:<(^)>(Map:D \a, Map:D \b) {
           nqp::iterator(nqp::getattr(nqp::decont(b),Map,'$!storage'))),
         nqp::stmts(
           nqp::if(                                # both have elems
-            nqp::eqaddr(b.keyof,Str(Any)),
-            nqp::while(                           # ordinary hash
-              iter,
-              nqp::if(
-                nqp::iterval(nqp::shift(iter)),
-                nqp::if(                          # should be checked
-                  nqp::existskey(
-                    elems,
-                    (my \which := nqp::iterkey_s(iter).WHICH)
-                  ),
-                  nqp::deletekey(elems,which),    # remove existing
-                  nqp::bindkey(elems,which,nqp::iterkey_s(iter)) # add new
-                )
-              )
-            ),
+            nqp::istype(b,Hash::Object),
             nqp::while(                           # object hash
               iter,
               nqp::if(
@@ -199,6 +184,20 @@ multi sub infix:<(^)>(Map:D \a, Map:D \b) {
                     nqp::iterkey_s(iter),
                     nqp::getattr(nqp::iterval(iter),Pair,'$!key')
                   )
+                )
+              )
+            ),
+            nqp::while(                           # ordinary hash
+              iter,
+              nqp::if(
+                nqp::iterval(nqp::shift(iter)),
+                nqp::if(                          # should be checked
+                  nqp::existskey(
+                    elems,
+                    (my \which := nqp::iterkey_s(iter).WHICH)
+                  ),
+                  nqp::deletekey(elems,which),    # remove existing
+                  nqp::bindkey(elems,which,nqp::iterkey_s(iter)) # add new
                 )
               )
             )
@@ -225,7 +224,7 @@ multi sub infix:<(^)>(Any \a, Any \b) {
             !! a.Set (^) b.Set
 }
 
-multi sub infix:<(^)>(**@p) {
+multi sub infix:<(^)>(+@p) {   # also Any
 
     # positions / size in minmax info
     my constant COUNT   = 0;
@@ -239,42 +238,39 @@ multi sub infix:<(^)>(**@p) {
 
     # handle key that has been seen before for given value
     sub handle-existing(Mu \elems, Mu \iter, \value --> Nil) {
-        nqp::stmts(
-          (my \minmax := nqp::getattr(
-            nqp::atkey(elems,nqp::iterkey_s(iter)),Pair,'$!value')
+        my \minmax := nqp::getattr(
+          nqp::atkey(elems,nqp::iterkey_s(iter)),Pair,'$!value'
+        );
+        nqp::bindpos(minmax,COUNT,nqp::add_i(nqp::atpos(minmax,COUNT),1));
+
+        nqp::if(
+          value > nqp::atpos(minmax,HIGHEST),
+          nqp::stmts(
+            nqp::bindpos(minmax,LOWEST,nqp::atpos(minmax,HIGHEST)),
+            nqp::bindpos(minmax,HIGHEST,value)
           ),
-          nqp::bindpos(minmax,COUNT,nqp::add_i(nqp::atpos(minmax,COUNT),1)),
           nqp::if(
-            value > nqp::atpos(minmax,HIGHEST),
-            nqp::stmts(
-              nqp::bindpos(minmax,LOWEST,nqp::atpos(minmax,HIGHEST)),
-              nqp::bindpos(minmax,HIGHEST,value)
-            ),
-            nqp::if(
-              nqp::not_i(nqp::defined(nqp::atpos(minmax,LOWEST)))
-                || value > nqp::atpos(minmax,LOWEST),
-              nqp::bindpos(minmax,LOWEST,value)
-            )
+            nqp::not_i(nqp::defined(nqp::atpos(minmax,LOWEST)))
+              || value > nqp::atpos(minmax,LOWEST),
+            nqp::bindpos(minmax,LOWEST,value)
           )
-        )
+        );
     }
 
     # handle key that has not yet been seen
     sub handle-new(Mu \elems, Mu \iter, \pair, \value) {
-        nqp::stmts(
-          (my \minmax := nqp::clone($init-minmax)),
-          nqp::bindpos(minmax,HIGHEST,value),
-          nqp::bindkey(
-            elems,
-            nqp::iterkey_s(iter),
-            nqp::p6bindattrinvres(pair,Pair,'$!value',minmax)
-          )
+        my \minmax := nqp::clone($init-minmax);
+        nqp::bindpos(minmax,HIGHEST,value);
+        nqp::bindkey(
+          elems,
+          nqp::iterkey_s(iter),
+          nqp::p6bindattrinvres(pair,Pair,'$!value',minmax)
         )
     }
 
     nqp::if(
       (my $params := @p.iterator).is-lazy,
-      Failure.new(X::Cannot::Lazy.new(:action('symmetric diff'))),  # bye bye
+      Any.fail-iterator-cannot-be-lazy('symmetric diff',''), # bye bye
 
       nqp::stmts(                                # fixed list of things to diff
         (my \elems := nqp::create(Rakudo::Internals::IterationSet)),
@@ -339,14 +335,14 @@ multi sub infix:<(^)>(**@p) {
                     handle-existing(             # seen this element before
                       elems,
                       $iter,
-                      nqp::istrue(nqp::iterval($iter))
+                      1
                     ),
                     handle-new(                  # new element
                       elems,
                       $iter,
                       nqp::p6bindattrinvres(
                         nqp::create(Pair),Pair,'$!key',nqp::iterval($iter)),
-                      nqp::istrue(nqp::iterval($iter))
+                      1
                     )
                   )
                 )
@@ -440,4 +436,4 @@ multi sub infix:<(^)>(**@p) {
 # U+2296 CIRCLED MINUS
 my constant &infix:<⊖> := &infix:<(^)>;
 
-# vim: ft=perl6 expandtab sw=4
+# vim: expandtab shiftwidth=4

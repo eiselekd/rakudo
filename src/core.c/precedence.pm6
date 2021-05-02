@@ -92,6 +92,10 @@ BEGIN {
     trait_mod:<is>(&infix:<(-)>, :prec($junctive_or));
     trait_mod:<is>(&infix:<(^)>, :prec($junctive_or));
 
+    trait_mod:<is>(&infix:<< > >>,  :prec($chaining));
+    trait_mod:<is>(&infix:<< < >>,  :prec($chaining));
+    trait_mod:<is>(&infix:<< >= >>, :prec($chaining));
+    trait_mod:<is>(&infix:<< <= >>, :prec($chaining));
     trait_mod:<is>(&infix:<==>,     :prec($chaining));
     trait_mod:<is>(&infix:<!=>,     :prec($chaining));
     trait_mod:<is>(&infix:<eq>,     :prec($chaining));
@@ -118,6 +122,9 @@ BEGIN {
     trait_mod:<is>(&infix:<<(>)>>,  :prec($chaining));
 # U+2285 NOT A SUPERSET OF
     trait_mod:<is>(&infix:<⊅>,      :prec($chaining));
+    trait_mod:<is>(&infix:<<(==)>>, :prec($chaining));
+# U+2262 NOT IDENTICAL TO
+    trait_mod:<is>(&infix:<≢>,      :prec($chaining));
     trait_mod:<is>(&infix:<<(<=)>>, :prec($chaining));
 # U+2288 NEITHER A SUBSET OF NOR EQUAL TO
     trait_mod:<is>(&infix:<⊈>,      :prec($chaining));
@@ -127,16 +134,17 @@ BEGIN {
     trait_mod:<is>(&infix:<<(<+)>>, :prec($chaining));
     trait_mod:<is>(&infix:<<(>+)>>, :prec($chaining));
 
-    trait_mod:<is>(&infix:<..>,     :prec($structural));
-    trait_mod:<is>(&infix:<^..>,    :prec($structural));
-    trait_mod:<is>(&infix:<..^>,    :prec($structural));
-    trait_mod:<is>(&infix:<^..^>,   :prec($structural));
-    trait_mod:<is>(&infix:<leg>,    :prec($structural));
-    trait_mod:<is>(&infix:<cmp>,    :prec($structural));
-    trait_mod:<is>(&infix:<unicmp>, :prec($structural));
-    trait_mod:<is>(&infix:<coll>,   :prec($structural));
-    trait_mod:<is>(&infix:<but>,    :prec($structural));
-    trait_mod:<is>(&infix:<does>,   :prec($structural));
+    trait_mod:<is>(&infix:<..>,      :prec($structural));
+    trait_mod:<is>(&infix:<^..>,     :prec($structural));
+    trait_mod:<is>(&infix:<..^>,     :prec($structural));
+    trait_mod:<is>(&infix:<^..^>,    :prec($structural));
+    trait_mod:<is>(&infix:<< <=> >>, :prec($structural));
+    trait_mod:<is>(&infix:<leg>,     :prec($structural));
+    trait_mod:<is>(&infix:<cmp>,     :prec($structural));
+    trait_mod:<is>(&infix:<unicmp>,  :prec($structural));
+    trait_mod:<is>(&infix:<coll>,    :prec($structural));
+    trait_mod:<is>(&infix:<but>,     :prec($structural));
+    trait_mod:<is>(&infix:<does>,    :prec($structural));
 
     trait_mod:<is>(&infix:<&&>, :prec($tight_and));
 
@@ -177,4 +185,4 @@ BEGIN {
     trait_mod:<is>(&infix:<orelse>, :prec($loose_orelse));
 }
 
-# vim: ft=perl6 expandtab sw=4
+# vim: expandtab shiftwidth=4

@@ -78,14 +78,12 @@ sub DIVIDE_NUMBERS(
 # which would be useless.  Also used when normalization *was* needed.
 proto sub CREATE_RATIONAL_FROM_INTS(|) is implementation-detail {*}
 multi sub CREATE_RATIONAL_FROM_INTS(Int:D \nu, Int:D \de, \t1, \t2) is raw {
-    nqp::if(
-      nqp::islt_I(de,UINT64_UPPER),         # do we need to downgrade to float?
-      nqp::p6bindattrinvres(                # no, we need to keep a Rat
-        nqp::p6bindattrinvres(nqp::create(Rat),Rat,'$!numerator',nu),
-        Rat,'$!denominator',de
-      ),
-      nqp::p6box_n(nqp::div_In(nu,de))      # downgrade to float
-    )
+    nqp::islt_I(de,UINT64_UPPER)           # do we need to downgrade to float?
+      ?? nqp::p6bindattrinvres(            # no, we need to keep a Rat
+           nqp::p6bindattrinvres(nqp::create(Rat),Rat,'$!numerator',nu),
+           Rat,'$!denominator',de
+         )
+      !! nqp::p6box_n(nqp::div_In(nu,de))  # downgrade to float
 }
 
 # already a FatRat, so keep that
@@ -489,7 +487,7 @@ multi sub infix:«>=»(Int:D \a, Rational:D \b --> Bool:D) {
     )
 }
 
-multi sub infix:«<=>»(Rational:D \a, Rational:D \b --> Order:D) {
+multi sub infix:«<=>»(Rational:D \a, Rational:D \b) {
 #    a.numerator * b.denominator <=> b.numerator * a.denominator
     ORDER(
       nqp::cmp_I(
@@ -506,7 +504,7 @@ multi sub infix:«<=>»(Rational:D \a, Rational:D \b --> Order:D) {
       )
     )
 }
-multi sub infix:«<=>»(Rational:D \a, Int:D \b --> Order:D) {
+multi sub infix:«<=>»(Rational:D \a, Int:D \b) {
 #    a.numerator  <=> b * a.denominator
     ORDER(
       nqp::cmp_I(
@@ -519,7 +517,7 @@ multi sub infix:«<=>»(Rational:D \a, Int:D \b --> Order:D) {
       )
     )
 }
-multi sub infix:«<=>»(Int:D \a, Rational:D \b --> Order:D) {
+multi sub infix:«<=>»(Int:D \a, Rational:D \b) {
 #    a * b.denominator <=> b.numerator
     ORDER(
       nqp::cmp_I(
@@ -533,4 +531,4 @@ multi sub infix:«<=>»(Int:D \a, Rational:D \b --> Order:D) {
     )
 }
 
-# vim: ft=perl6 expandtab sw=4
+# vim: expandtab shiftwidth=4

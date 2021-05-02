@@ -1,5 +1,3 @@
-my class Proc::Async { ... }
-
 my role X::Proc::Async is Exception {
     has Proc::Async $.proc;
 }
@@ -101,6 +99,8 @@ my class Proc::Async {
     has $.w;
     has $.enc = 'utf8';
     has $.translate-nl = True;
+    has $.arg0;
+    has $.win-verbatim-args = False;
     has Bool $.started = False;
     has $!stdout_supply;
     has CharsOrBytes $!stdout_type;
@@ -129,6 +129,9 @@ my class Proc::Async {
 
     submethod TWEAK(--> Nil) {
         $!encoder := Encoding::Registry.find($!enc).encoder(:$!translate-nl);
+
+        $!arg0 //= $!path;
+        @!args.unshift: $!arg0;
     }
 
     method !pipe-cbs(\channel) {
@@ -285,6 +288,22 @@ my class Proc::Async {
         $promise
     }
 
+    method !win-quote-CommandLineToArgvW(*@args) {
+        my @quoted_args;
+        for @args -> $arg {
+            if !$arg.contains(' ') && !$arg.contains('"') && !$arg.contains('\t') && !$arg.contains('\n') && !$arg.contains('\v') {
+                @quoted_args.push: $arg;
+            }
+            else {
+                my $quoted_arg = $arg;
+                $quoted_arg ~~ s:g/ ( \\* ) \" /$0$0\\\"/;
+                $quoted_arg ~~ s/ ( \\+ ) $ /$0$0/;
+                @quoted_args.push: '"' ~ $quoted_arg ~ '"';
+            }
+        }
+        @quoted_args.join: ' '
+    }
+
     method start(Proc::Async:D:
       :$scheduler = $*SCHEDULER, :$ENV, :$cwd = $*CWD
     --> Promise) {
@@ -302,13 +321,36 @@ my class Proc::Async {
 
     method !start-internal($scheduler, $ENV, $cwd --> Promise) {
         my %ENV := $ENV ?? $ENV.hash !! %*ENV;
+
+#?if jvm
+        # The Java process API does not allow disabling Javas
+        # sophisticated heuristics of command mangling.
+        # NQPs spawnprocasync implementation on JVM thus overwrites
+        # arg[0] with the program name and forwards the result to Javas
+        # APIs.
+        # So we do not quote the arguments and just let Java do its magic.
+        my @quoted-args := @!args;
+#?endif
+#?if !jvm
+        my @quoted-args;
+        if Rakudo::Internals.IS-WIN {
+            @quoted-args.push(
+                $!win-verbatim-args
+                    ?? @!args.join(' ')
+                    !! self!win-quote-CommandLineToArgvW(@!args));
+        }
+        else {
+            @quoted-args := @!args;
+        }
+#?endif
+
         $!exit_promise := Promise.new;
 
         my Mu $callbacks := nqp::hash();
         nqp::bindkey($callbacks, 'done', -> Mu \status {
            $!exit_promise.keep(Proc.new(
                :exitcode(status +> 8), :signal(status +& 0xFF),
-               :command( $!path, |@!args ),
+               :command( @!command ),
            ))
         });
 
@@ -347,7 +389,7 @@ my class Proc::Async {
           self!capture($callbacks,'merge',$!merge_supply)
         ) if $!merge_supply;
 
-        nqp::bindkey($callbacks, 'buf_type', buf8.new);
+        nqp::bindkey($callbacks, 'buf_type', nqp::create(buf8.^pun));
         nqp::bindkey($callbacks, 'write', True) if $.w;
         nqp::bindkey($callbacks, 'stdin_fd', $!stdin-fd) if $!stdin-fd.DEFINITE;
         nqp::bindkey($callbacks, 'stdin_fd_close', True) if $!stdin-fd-close;
@@ -355,7 +397,8 @@ my class Proc::Async {
         nqp::bindkey($callbacks, 'stderr_fd', $!stderr-fd) if $!stderr-fd.DEFINITE;
 
         $!process_handle := nqp::spawnprocasync($scheduler.queue(:hint-affinity),
-            CLONE-LIST-DECONTAINERIZED($!path,@!args),
+            $!path.Str,
+            CLONE-LIST-DECONTAINERIZED(@quoted-args),
             $cwd.Str,
             CLONE-HASH-DECONTAINERIZED(%ENV),
             $callbacks,
@@ -447,4 +490,4 @@ my class Proc::Async {
     }
 }
 
-# vim: ft=perl6 expandtab sw=4
+# vim: expandtab shiftwidth=4

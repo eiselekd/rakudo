@@ -149,8 +149,6 @@ role STD {
         }
     }
 
-    my @herestub_queue;
-
     my class Herestub {
         has $!delim;
         has $!orignode;
@@ -168,6 +166,7 @@ role STD {
 
     method heredoc () {
         my $actions := self.actions;
+        my @herestub_queue := $*W.herestub_queue;
         if @herestub_queue {
             my $here := self.'!cursor_start_cur'();
             $here.'!cursor_pos'(self.pos);
@@ -208,12 +207,11 @@ role STD {
     }
 
     token cheat_heredoc {
-        <?{ +@herestub_queue }> \h* <[ ; } ]> \h* <?before \n | '#'> <.ws> <?MARKER('endstmt')>
+        <?{ nqp::elems($*W.herestub_queue) }> \h* <[ ; } ]> \h* <?before \n | '#'> <.ws> <?MARKER('endstmt')>
     }
 
     method queue_heredoc($delim, $grammar) {
-        nqp::ifnull(@herestub_queue, @herestub_queue := []);
-        nqp::push(@herestub_queue, Herestub.new(:$delim, :$grammar, :orignode(self)));
+        nqp::push($*W.herestub_queue, Herestub.new(:$delim, :$grammar, :orignode(self)));
         return self;
     }
     method fail-terminator ($/, $start, $stop, $line?) {
@@ -346,7 +344,7 @@ role STD {
     }
 
     token experimental($feature) {
-        <?{ try $*W.find_symbol(['EXPERIMENTAL-' ~ nqp::uc($feature)]) }>
+        <?{ $*COMPILING_CORE_SETTING || try $*W.find_single_symbol('EXPERIMENTAL-' ~ nqp::uc($feature)) }>
         || <.typed_panic('X::Experimental', :$feature)>
     }
 
@@ -526,22 +524,22 @@ grammar Perl6::Grammar is HLL::Grammar does STD {
         self.set_how('package', nqp::knowhow());
 
         # Will we use the result of this? (Yes for EVAL and REPL).
-        my $*NEED_RESULT := nqp::existskey(%*COMPILING<%?OPTIONS>, 'outer_ctx');
+        my $*NEED_RESULT := nqp::existskey(%*COMPILING<%?OPTIONS>, 'outer_ctx')
+                         || nqp::existskey(%*COMPILING<%?OPTIONS>, 'need_result');
 
         # Symbol table and serialization context builder - keeps track of
         # objects that cross the compile-time/run-time boundary that are
         # associated with this compilation unit.
         my $file := nqp::getlexdyn('$?FILES');
-        my $source_id := nqp::sha1($file ~ (
-            nqp::defined(%*COMPILING<%?OPTIONS><outer_ctx>)
-                ?? self.target() ~ SerializationContextId.next-id()
-                !! self.target()));
         my $outer_world := nqp::getlexdyn('$*W');
         my $is_nested := (
             $outer_world
-            && nqp::defined(%*COMPILING<%?OPTIONS><outer_ctx>)
             && $outer_world.is_precompilation_mode()
         );
+        my $source_id := nqp::sha1($file ~ (
+            $is_nested
+                ?? self.target() ~ SerializationContextId.next-id()
+                !! self.target()));
 
         my $*W := $is_nested
             ?? $outer_world.create_nested()
@@ -685,6 +683,7 @@ grammar Perl6::Grammar is HLL::Grammar does STD {
         | [\r\n || \v] <.heredoc>
         | <.unv>
         | <.unsp>
+        | <.vcs-conflict>
         ]*
         <?MARKER('ws')>
         :my $stub := self.'!fresh_highexpect'();
@@ -705,10 +704,16 @@ grammar Perl6::Grammar is HLL::Grammar does STD {
         [
             [
             | \v
-            | '<<<<<<<' {} <?before [.*? \v '=======']: .*? \v '>>>>>>>' > <.sorry: 'Found a version control conflict marker'> \V* \v
-            | '=======' {} .*? \v '>>>>>>>' \V* \v   # ignore second half
+            | <.vcs-conflict>
             ]
         ]+
+    }
+
+    token vcs-conflict {
+        [
+        | '<<<<<<<' {} <?before [.*? \v '=======']: .*? \v '>>>>>>>' > <.sorry: 'Found a version control conflict marker'> \V* \v
+        | '=======' {} .*? \v '>>>>>>>' \V* \v   # ignore second half
+        ]
     }
 
     token unv {
@@ -929,7 +934,7 @@ grammar Perl6::Grammar is HLL::Grammar does STD {
             my int $line      := HLL::Compiler.lineof($orig, self.from(), :cache(1));
             my str $prematch  := nqp::substr($orig, $from > 20 ?? $from - 20 !! 0, $from > 20 ?? 20 !! $from);
             my str $postmatch := nqp::substr($orig, $to, 20);
-            my $label     := $*W.find_symbol(['Label']).new( :name($*LABEL), :$line, :$prematch, :$postmatch );
+            my $label     := $*W.find_single_symbol('Label').new( :name($*LABEL), :$line, :$prematch, :$postmatch );
             $*W.add_object_if_no_sc($label);
             $*W.install_lexical_symbol($*W.cur_lexpad(), $*LABEL, $label);
         }
@@ -1335,7 +1340,7 @@ grammar Perl6::Grammar is HLL::Grammar does STD {
             self.LANG($langname, $regex, @args);
         }
         else {
-            my $Str := $*W.find_symbol(['Str']);
+            my $Str := $*W.find_single_symbol('Str');
             my $actions := self.slang_actions($langname);
             my $lang_cursor := $grammar.'!cursor_init'($Str.new( :value(self.orig())), :p(self.pos()));
             $lang_cursor.clone_braid_from(self);
@@ -1347,7 +1352,7 @@ grammar Perl6::Grammar is HLL::Grammar does STD {
 
             # Build up something NQP-levelish we can return.
             my $new := NQPMatch.'!cursor_init'(self.orig(), :p(self.pos()), :shared(self.'!shared'()));
-            my $p6cursor := $*W.find_symbol(['Match']);
+            my $p6cursor := $*W.find_single_symbol('Match');
             nqp::bindattr_i($new, NQPMatch, '$!from',  nqp::getattr_i($ret, $p6cursor, '$!from'));
             nqp::bindattr_i($new, NQPMatch, '$!pos',   nqp::getattr_i($ret, $p6cursor, '$!pos'));
             my str $p6c_name := nqp::getattr_s($ret, $p6cursor, '$!name');
@@ -1617,7 +1622,7 @@ grammar Perl6::Grammar is HLL::Grammar does STD {
                 );
                 nqp::iseq_i($chars-num, $pos);
             }>
-            { $*key := $<identifier>.Str; $*value := nqp::radix_I(10, $<num>, 0, 0, $*W.find_symbol(['Int']))[0]; }
+            { $*key := $<identifier>.Str; $*value := nqp::radix_I(10, $<num>, 0, 0, $*W.find_single_symbol('Int'))[0]; }
         | <identifier>
             { $*key := $<identifier>.Str; }
             [
@@ -1982,7 +1987,7 @@ grammar Perl6::Grammar is HLL::Grammar does STD {
                             if $key eq 'ver' {
                                 $*VER := $*W.handle-begin-time-exceptions($/,
                                     'parsing package version',
-                                    -> { $*W.find_symbol(['Version']).new($adverb.value) });
+                                    -> { $*W.find_single_symbol('Version').new($adverb.value) });
                             }
                             elsif $key eq 'api' {
                                 $*API := $adverb.value;
@@ -2522,10 +2527,10 @@ grammar Perl6::Grammar is HLL::Grammar does STD {
                 $*IN_DECL := '';
 
                 my $meta := $<specials> && ~$<specials> eq '^';
-                my $invocant_type := $*W.find_symbol([
+                my $invocant_type := $*W.find_single_symbol(
                     $<longname> && $*W.is_lexical('$?CLASS') && !$meta
                         ?? '$?CLASS'
-                        !! 'Mu']);
+                        !! 'Mu');
                 if $<multisig> {
                     %*SIG_INFO := $<multisig>.ast;
                     $*SIG_OBJ := $*W.create_signature_and_params($<multisig>,
@@ -2759,7 +2764,7 @@ grammar Perl6::Grammar is HLL::Grammar does STD {
             my $line_no := HLL::Compiler.lineof(self.orig(), self.from(), :cache(1));
             if $*PRECEDING_DECL_LINE < $line_no {
                 $*PRECEDING_DECL_LINE := $line_no;
-                my $par_type := $*W.find_symbol(['Parameter'], :setting-only);
+                my $par_type := $*W.find_single_symbol('Parameter', :setting-only);
                 $*PRECEDING_DECL := nqp::create($par_type); # actual declarand comes later, in World::create_parameter
             }
         }
@@ -3867,7 +3872,7 @@ grammar Perl6::Grammar is HLL::Grammar does STD {
         :my $*IN_REDUCE := 1;
         :my $op;
         <?before '['\S+']'>
-        <!before '[' <.[ - + ? ~ ^ ]> <.[ \w $ @ ]> >  # disallow accidental prefix before termish thing
+        <!before '['+ <.[ - + ? ~ ^ ]> <.[ \w $ @ ]> >  # disallow accidental prefix before termish thing
 
         '['
         [
@@ -4187,6 +4192,9 @@ grammar Perl6::Grammar is HLL::Grammar does STD {
     token infix:sym«(>)»    { <sym> <O(|%chaining)> }
     token infix:sym«⊃»      { <sym> <O(|%chaining)> }
     token infix:sym«⊅»      { <sym> <O(|%chaining)> }
+    token infix:sym«(==)»   { <sym> <O(|%chaining)> }
+    token infix:sym«≡»      { <sym> <O(|%chaining)> }
+    token infix:sym«≢»      { <sym> <O(|%chaining)> }
     token infix:sym«(<=)»   { <sym> <O(|%chaining)> }
     token infix:sym«⊆»      { <sym> <O(|%chaining)> }
     token infix:sym«⊈»      { <sym> <O(|%chaining)> }
@@ -4572,13 +4580,13 @@ grammar Perl6::Grammar is HLL::Grammar does STD {
             # If the sub is in the form of something:<blah>, then we assume
             # the user is trying to define a custom op for an unknown category
             # We also reserve something:sym<blah> form for future use
-            # (see https://irclog.perlgeek.de/perl6/2017-01-25#i_13988093)
+            # (see https://colabti.org/irclogger/irclogger_log/perl6?date=2017-01-25#l1011)
             # If it's neither of those cases, then it's just a sub with an
             # extended name like sub foo:bar<baz> {}; let the user use it.
             self.typed_panic(
                 'X::Syntax::Extension::Category', :$category
             ) if nqp::iseq_s($subname, "$category:<$opname>")
-              || nqp::iseq_s($subname, "$category:sym<$opname>") && $*W.lang-ver-before('d');
+              || nqp::iseq_s($subname, "$category:sym<$opname>") && $*W.lang-rev-before('d');
 
             self.typed_panic(
                 'X::Syntax::Reserved', :reserved(':sym<> colonpair')
@@ -5712,7 +5720,7 @@ grammar Perl6::QGrammar is HLL::Grammar does STD {
 my role MatchPackageNibbler {
     method nibble-in-cursor($parent) {
         my $*LEAF := self;
-        my $*PACKAGE := $*W.find_symbol(['Match']); self.set_package($*PACKAGE);
+        my $*PACKAGE := $*W.find_single_symbol('Match'); self.set_package($*PACKAGE);
         my %*ATTR_USAGES;
         my $cur := nqp::findmethod($parent, 'nibbler')(self);
         for %*ATTR_USAGES {
@@ -5870,4 +5878,4 @@ grammar Perl6::P5RegexGrammar is QRegex::P5Regex::Grammar does STD does MatchPac
     }
 }
 
-# vim: ft=perl6 et sw=4
+# vim: expandtab sw=4

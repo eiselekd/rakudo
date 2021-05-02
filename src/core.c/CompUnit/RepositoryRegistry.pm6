@@ -128,7 +128,7 @@ class CompUnit::RepositoryRegistry {
         # set up and normalize $prefix if needed
         my str $prefix = nqp::ifnull(
           nqp::atkey($ENV,'RAKUDO_PREFIX'),
-          nqp::getcurhllsym('$RAKUDO_HOME')
+          nqp::gethllsym('default', 'SysConfig').rakudo-home()
         );
         $prefix = $prefix.subst(:g, '/', $sep) if Rakudo::Internals.IS-WIN;
 
@@ -253,12 +253,9 @@ class CompUnit::RepositoryRegistry {
         }
     }
 
-    method repository-for-name(Str:D \name) {
+    method repository-for-name(str $name) {
         $*REPO; # initialize if not yet done
-        my str $name = nqp::unbox_s(name);
-        nqp::existskey($custom-lib,$name)
-          ?? nqp::atkey($custom-lib,$name)
-          !! Nil
+        nqp::ifnull(nqp::atkey($custom-lib,$name),Nil)
     }
 
     method register-name($name, CompUnit::Repository $repo) {
@@ -314,7 +311,7 @@ class CompUnit::RepositoryRegistry {
             exit 1;
         }
 
-        my $meta = @metas.sort(*.<ver>).reverse.head;
+        my $meta = @metas.sort(*.<ver>).sort(*.<api>).reverse.head;
         my $bin  = $meta<source>;
         require "$bin";
     }
@@ -339,7 +336,7 @@ class CompUnit::RepositoryRegistry {
                 PROCESS::<$REPO> := $head;
 
                 # Cannot just use GLOBAL.WHO here as that gives a BOOTHash
-                $*W.find_symbol(nqp::list("GLOBAL")).WHO.merge-symbols(
+                $*W.find_single_symbol("GLOBAL").WHO.merge-symbols(
                   $comp_unit.handle.globalish-package);
 
                 $repo := self.repository-for-spec($repo.path-spec, :$next-repo);
@@ -446,4 +443,4 @@ class CompUnit::RepositoryRegistry {
     }
 }
 
-# vim: ft=perl6 expandtab sw=4
+# vim: expandtab shiftwidth=4

@@ -20,6 +20,12 @@ my class X::Does::TypeObject is Exception {
 }
 
 proto sub infix:<does>(Mu, |) {*}
+multi sub infix:<does>(Int:D, |) {
+    die "Cannot use 'does' operator on an Int, did you mean 'but'?";
+}
+multi sub infix:<does>(Str:D, |) {
+    die "Cannot use 'does' operator on a Str, did you mean 'but'?";
+}
 multi sub infix:<does>(Mu:D \obj, Mu:U \rolish) is raw {
     # XXX Mutability check.
     my $role := rolish.HOW.archetypes.composable() ?? rolish !!
@@ -55,13 +61,6 @@ multi sub infix:<does>(Mu:U \obj, **@roles) is raw {
     X::Does::TypeObject.new(type => obj).throw
 }
 
-# we need this candidate tighter than infix:<cmp>(Real:D, Real:D)
-# but can't yet use `is default` at the place where that candidate
-# is defined because it uses `infix:<does>`
-multi sub infix:<cmp>(Rational:D \a, Rational:D \b) is default {
-    a.isNaN || b.isNaN ?? a.Num cmp b.Num !! a <=> b
-}
-
 proto sub infix:<but>(Mu, |) is pure {*}
 multi sub infix:<but>(Mu:D \obj, Mu:U \rolish) {
     my $role := rolish.HOW.archetypes.composable() ?? rolish !!
@@ -91,6 +90,8 @@ multi sub infix:<but>(Mu:U \obj, Mu:U \rolish) {
 }
 sub GENERATE-ROLE-FROM-VALUE($val) is implementation-detail {
     my $role := Metamodel::ParametricRoleHOW.new_type();
+    # The auto-generated role doesn't use any of 6.e features. Thus can safely be proclaimed as 6.c.
+    $role.^set_language_revision('c');
     my $meth := method () { $val };
     $meth.set_name($val.^name);
     $role.^add_method($meth.name, $meth);
@@ -482,4 +483,4 @@ my constant &infix:<∘> := &infix:<o>;
 # to allow =~ to work with "no isms <Perl5>", otherwise caught in compilation
 sub infix:<=~>(\a,\b) { a = ~b }
 
-# vim: ft=perl6 expandtab sw=4
+# vim: expandtab shiftwidth=4

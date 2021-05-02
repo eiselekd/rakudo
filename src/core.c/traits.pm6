@@ -67,10 +67,25 @@ multi sub trait_mod:<is>(Mu:U $type, Mu :$array_type!) {
     $type.^set_array_type($array_type);
 }
 multi sub trait_mod:<is>(Mu:U $type, Mu:U $parent, Block) {
-    X::Syntax::ParentAsHash.new(:$parent).throw;
+    X::Syntax::ParentAsHash.new(
+      :type($type.^name),
+      :parent($parent.^name),
+      :what<Block>
+    ).throw;
 }
 multi sub trait_mod:<is>(Mu:U $type, Mu:U $parent, Hash) {
-    X::Syntax::ParentAsHash.new(:$parent).throw;
+    X::Syntax::ParentAsHash.new(
+      :type($type.^name),
+      :parent($parent.^name),
+      :what<Hash>
+    ).throw;
+}
+multi sub trait_mod:<is>(Mu:U $type, :$implementation-detail!) {
+    my role is-implementation-detail {
+        method is-implementation-detail(Mu --> 1) { }
+    }
+    $type.HOW.^mixin(is-implementation-detail)
+      if $implementation-detail;
 }
 multi sub trait_mod:<is>(Mu:U $type, *%fail) {
     if %fail.keys[0] !eq $type.^name {
@@ -121,7 +136,7 @@ multi sub trait_mod:<is>(Attribute:D $attr, :$DEPRECATED!) {
     my $new := nqp::istype($DEPRECATED,Bool)
       ?? "something else"
       !! $DEPRECATED;
-    role is-DEPRECATED { has $.DEPRECATED }
+    my role is-DEPRECATED { has $.DEPRECATED }
     $attr does is-DEPRECATED($new);
 }
 multi sub trait_mod:<is>(Attribute:D $attr, :$leading_docs!) {
@@ -147,8 +162,8 @@ multi sub trait_mod:<is>(Routine:D $r, |c ) {
         declaring  => ' ' ~ $r.^name.split('+').head.lc,
         highexpect => (
             'rw raw hidden-from-backtrace hidden-from-USAGE pure default',
-            'DEPRECATED inlinable nodal prec equiv tighter looser assoc',
-            'leading_docs trailing_docs',
+            'implementation-detail DEPRECATED inlinable nodal prec equiv',
+            'tighter looser assoc leading_docs trailing_docs',
             ('',"or did you forget to 'use NativeCall'?"
               if $subtype eq 'native').Slip
           ),
@@ -167,6 +182,8 @@ multi sub trait_mod:<is>(Routine:D $r, :$DEPRECATED!) {
     my $new := nqp::istype($DEPRECATED,Bool)
       ?? "something else"
       !! $DEPRECATED;
+    my role is-DEPRECATED { has $.DEPRECATED }
+    $r does is-DEPRECATED($new);
     $r.add_phaser( 'ENTER', -> { Rakudo::Deprecations.DEPRECATED($new) } );
 }
 multi sub trait_mod:<is>(Routine:D $r, Mu :$inlinable!) {
@@ -553,4 +570,4 @@ multi sub trait_mod:<hides>(Mu:U $child, Mu:U $parent) {
     }
 }
 
-# vim: ft=perl6 expandtab sw=4
+# vim: expandtab shiftwidth=4

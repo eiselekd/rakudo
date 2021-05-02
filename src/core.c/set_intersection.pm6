@@ -5,7 +5,6 @@
 proto sub infix:<(&)>(|) is pure {*}
 multi sub infix:<(&)>()               { set() }
 multi sub infix:<(&)>(QuantHash:D \a) { a     } # Set/Bag/Mix
-multi sub infix:<(&)>(Any \a)         { a.Set } # also for Iterable/Map
 
 multi sub infix:<(&)>(Setty:D \a, Setty:D \b) {
     nqp::if(
@@ -63,21 +62,17 @@ multi sub infix:<(&)>(Mixy:D \a, Mixy:D \b) {
     Rakudo::QuantHash.INTERSECT-BAGGIES(a, b, Mix)
 }
 multi sub infix:<(&)>(Baggy:D \a, Any:D \b) {
-    nqp::if(
-      nqp::istype((my $bbag := b.Bag),Bag),
-      Rakudo::QuantHash.INTERSECT-BAGGIES(a, $bbag, Bag),
-      $bbag.throw
-    )
+    nqp::istype((my $bbag := b.Bag),Bag)
+      ?? Rakudo::QuantHash.INTERSECT-BAGGIES(a, $bbag, Bag)
+      !! $bbag.throw
 }
 multi sub infix:<(&)>(Any:D \a, Baggy:D \b) {
     b.Bag (&) a
 }
 multi sub infix:<(&)>(Mixy:D \a, Any:D \b) {
-    nqp::if(
-      nqp::istype((my $bmix := b.Mix),Mix),
-      Rakudo::QuantHash.INTERSECT-BAGGIES(a, $bmix, Mix),
-      $bmix.throw
-    )
+    nqp::istype((my $bmix := b.Mix),Mix)
+      ?? Rakudo::QuantHash.INTERSECT-BAGGIES(a, $bmix, Mix)
+      !! $bmix.throw
 }
 multi sub infix:<(&)>(Any:D \a, Mixy:D \b) {
     b.Mix (&) a
@@ -85,7 +80,8 @@ multi sub infix:<(&)>(Any:D \a, Mixy:D \b) {
 
 multi sub infix:<(&)>(Map:D \a, Map:D \b) {
     nqp::if(
-      nqp::eqaddr(a.keyof,Str(Any)) && nqp::eqaddr(b.keyof,Str(Any)),
+      nqp::istype(a,Hash::Object) || nqp::istype(b,Hash::Object),
+      (a.Set (&) b.Set),                     # either is object hash, coerce!
       nqp::if(                               # both ordinary Str hashes
         nqp::elems(
           my \araw := nqp::getattr(nqp::decont(a),Map,'$!storage')
@@ -119,8 +115,7 @@ multi sub infix:<(&)>(Map:D \a, Map:D \b) {
           nqp::create(Set).SET-SELF($elems)
         ),
         set()                                # one/neither has elems
-      ),
-      (a.Set (&) b.Set)                      # object hash(es), coerce!
+      )
     )
 }
 
@@ -147,13 +142,18 @@ multi sub infix:<(&)>(Any \a, Any \b) {
       !! a.Set (&) b
 }
 
-multi sub infix:<(&)>(**@p) {
-    my $result = @p.shift;
-    $result = $result (&) @p.shift while @p;
-    $result
+multi sub infix:<(&)>(+@p) { # also Any
+    my $result := @p.shift;
+    if @p {
+        $result := $result (&) @p.shift while @p;
+        $result
+    }
+    else {
+        $result.Set
+    }
 }
 
 # U+2229 INTERSECTION
 my constant &infix:<∩> := &infix:<(&)>;
 
-# vim: ft=perl6 expandtab sw=4
+# vim: expandtab shiftwidth=4

@@ -84,7 +84,12 @@ class Rakudo::Deprecations {
 
         my $bt = Backtrace.new;
         my $deprecated =
+#?if !js
+          $bt[ my $index = $bt.next-interesting-index(1, :named, :setting) // 0 ];
+#?endif
+#?if js
           $bt[ my $index = $bt.next-interesting-index(2, :named, :setting) // 0 ];
+#?endif
 
         if $up ~~ Whatever {
             $index = $_ with $bt.next-interesting-index($index, :noproto);
@@ -137,4 +142,4 @@ sub DEPRECATED(|c) is hidden-from-backtrace is implementation-detail {
     Rakudo::Deprecations.DEPRECATED(|c)
 }
 
-# vim: ft=perl6 expandtab sw=4
+# vim: expandtab shiftwidth=4

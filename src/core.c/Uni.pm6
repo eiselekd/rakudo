@@ -4,14 +4,21 @@ my class NFKC is repr('VMArray') is array_type(uint32) { ... }
 my class NFKD is repr('VMArray') is array_type(uint32) { ... }
 
 my class Uni does Positional[uint32] does Stringy is repr('VMArray') is array_type(uint32) {
-    method new(*@codes) {
-        my $uni := nqp::create(self);
-        my int $n = @codes.elems;
-        loop (my int $i = 0; $i < $n; $i = $i + 1) {
-            nqp::bindpos_i($uni, $i, @codes.AT-POS($i));
-        }
+
+    multi method new(Uni:) { nqp::create(self) }
+    multi method new(Uni: *@codes) {
+        @codes.elems;  # reify and test for lazy sequences
+        my $uni        := nqp::create(self);
+        my $codepoints := nqp::getattr(@codes,List,'$!reified');
+
+        nqp::while(
+          nqp::elems($codepoints),
+          nqp::push_i($uni,nqp::shift($codepoints))
+        );
+
         $uni
     }
+    # array[uint32] candidate added in core_epilogue
 
     my class UniList does PredictiveIterator {
         has $!uni;
@@ -25,30 +32,27 @@ my class Uni does Positional[uint32] does Stringy is repr('VMArray') is array_ty
         }
         method new (\uni) { nqp::create(self)!SET-SELF: uni }
         method pull-one {
-            nqp::if(
-              nqp::islt_i(($!i = nqp::add_i($!i, 1)), $!els),
-              nqp::atpos_i($!uni, $!i),
-              IterationEnd
-            )
+            nqp::islt_i(($!i = nqp::add_i($!i, 1)), $!els)
+              ?? nqp::atpos_i($!uni, $!i)
+              !! IterationEnd
         }
         method skip-one {
             nqp::islt_i(($!i = nqp::add_i($!i, 1)), $!els)
         }
         method push-all(\target --> IterationEnd) {
-            nqp::stmts(
-              (my     $uni := $!uni), # lexicals faster than attrs
-              (my int $els  = $!els),
-              (my int $i    = $!i),
-              nqp::while(
-                nqp::islt_i(($i = nqp::add_i($i, 1)), $els),
-                target.push: nqp::atpos_i($uni, $i)
-              ),
-              ($!i = $i)
-            )
+            my     $uni := $!uni; # lexicals faster than attrs
+            my int $els  = $!els;
+            my int $i    = $!i;
+            nqp::while(
+              nqp::islt_i(($i = nqp::add_i($i, 1)), $els),
+              target.push: nqp::atpos_i($uni, $i)
+            );
+            $!i = $i;
         }
         method count-only(--> Int:D) {
             nqp::p6box_i($!els - $!i - nqp::islt_i($!i,$!els))
         }
+        method sink-all(--> IterationEnd) { $!i = $!els }
     }
     method list(Uni:D:) { Seq.new(UniList.new(self)) }
 
@@ -154,4 +158,4 @@ my class NFKC is Uni {
     }
 }
 
-# vim: ft=perl6 expandtab sw=4
+# vim: expandtab shiftwidth=4

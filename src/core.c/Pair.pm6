@@ -1,7 +1,7 @@
 my class Pair does Associative {
     has $.key is default(Nil);
     has $.value is rw is default(Nil);
-    has Mu $!WHICH;
+    has ObjAt $!WHICH;
 
     proto method new(|) {*}
     # This candidate is needed because it currently JITS better
@@ -28,24 +28,25 @@ my class Pair does Associative {
         nqp::p6bindattrinvres(self.Mu::clone, Pair, '$!WHICH', nqp::null)
     }
     multi method WHICH(Pair:D: --> ObjAt:D) {
-        nqp::unless(
-          $!WHICH,
-          ($!WHICH := nqp::if(
-            nqp::iscont($!value)
-              || nqp::not_i(nqp::istype((my $VALUE := $!value.WHICH),ValueObjAt)),
-            self.Mu::WHICH,
-            nqp::box_s(
-              nqp::concat(
-                nqp::if(
-                  nqp::eqaddr(self.WHAT,Pair),
-                  'Pair|',
-                  nqp::concat(self.^name,'|')
-                ),
-                nqp::sha1(nqp::concat(nqp::concat($!key.WHICH,"\0"),$VALUE))
+        nqp::isconcrete($!WHICH) ?? $!WHICH !! self!WHICH
+    }
+
+    method !WHICH() {
+        $!WHICH := nqp::if(
+          nqp::iscont($!value)
+            || nqp::not_i(nqp::istype((my $VALUE := $!value.WHICH),ValueObjAt)),
+          self.Mu::WHICH,
+          nqp::box_s(
+            nqp::concat(
+              nqp::if(
+                nqp::eqaddr(self.WHAT,Pair),
+                'Pair|',
+                nqp::concat(self.^name,'|')
               ),
-              ValueObjAt
-            )
-          ))
+              nqp::sha1(nqp::concat(nqp::concat($!key.WHICH,"\0"),$VALUE))
+            ),
+            ValueObjAt
+          )
         )
     }
 
@@ -56,17 +57,14 @@ my class Pair does Associative {
         $!value.ACCEPTS(nqp::getattr(nqp::decont($p),Pair,'$!value'));
     }
     multi method ACCEPTS(Pair:D: Mu $other) {
-        nqp::if(
-          nqp::can($other,(my $method := $!key.Str)),
-          ($other."$method"().Bool === $!value.Bool),
-          X::Method::NotFound.new(
-            invocant => $other,
-            method   => $method,
-            typename => $other.^name,
-            addendum => "Did you try to smartmatch against a Pair specifically?  If so, then the
-key of the Pair should be a valid method name, not '$method'."
-          ).throw
-        )
+        nqp::can($other,(my $method := $!key.Str))
+          ?? ($other."$method"().Bool === $!value.Bool)
+          !! X::Method::NotFound.new(
+               invocant => $other,
+               method   => $method,
+               typename => $other.^name,
+               addendum => "Or did you try to smartmatch against a Pair specifically?  If so, then the key of the Pair should be a valid method name, not '$method'."
+             ).throw
     }
 
     method Pair() { self }
@@ -139,7 +137,7 @@ key of the Pair should be a valid method name, not '$method'."
     multi method raku(Pair:D: :$arglist = False) {
         self.rakuseen:
           self.^name,
-          {   
+          {
               nqp::isconcrete($!key)
                 ?? nqp::istype($!key,Str)
                      && nqp::not_i($arglist)
@@ -190,9 +188,9 @@ key of the Pair should be a valid method name, not '$method'."
     }
 }
 
-multi sub infix:<eqv>(Pair:D \a, Pair:D \b) {
+multi sub infix:<eqv>(Pair:D \a, Pair:D \b --> Bool:D) {
     nqp::hllbool(
-      nqp::eqaddr(a,b)
+      nqp::eqaddr(nqp::decont(a),nqp::decont(b))
         || (nqp::eqaddr(a.WHAT,b.WHAT)
              && a.key   eqv b.key
              && a.value eqv b.value)
@@ -200,7 +198,9 @@ multi sub infix:<eqv>(Pair:D \a, Pair:D \b) {
 }
 
 multi sub infix:<cmp>(Pair:D \a, Pair:D \b) {
-    (a.key cmp b.key) || (a.value cmp b.value)
+    nqp::eqaddr((my $cmp := a.key cmp b.key),Order::Same)
+      ?? (a.value cmp b.value)
+      !! $cmp
 }
 
 proto sub infix:«=>»(Mu, Mu, *%) is pure {*}
@@ -209,4 +209,4 @@ multi sub infix:«=>»(Mu $key, Mu \value) { Pair.new($key, value) }
 proto sub pair(Mu, Mu, *%) is pure {*}
 multi sub pair(Mu \key, Mu \value) { Pair.new(key, value) }
 
-# vim: ft=perl6 expandtab sw=4
+# vim: expandtab shiftwidth=4

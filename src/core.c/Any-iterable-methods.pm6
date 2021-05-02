@@ -1,4 +1,7 @@
-class X::Cannot::Map { ... }
+my class X::Cannot::Empty { ... }
+my class X::Cannot::Lazy  { ... }
+my class X::Cannot::Map   { ... }
+my class Rakudo::Sorting  { ... }
 
 # Now that Iterable is defined, we add extra methods into Any for the list
 # operations. (They can't go into Any right away since we need Attribute to
@@ -9,6 +12,47 @@ class X::Cannot::Map { ... }
 # work on by doing a .list coercion.
 use MONKEY-TYPING;
 augment class Any {
+
+    # Because the first occurrence of "method chrs" is in the intarray
+    # role, we need to create the proto earlier in the setting.  That's
+    # why it is not in unicodey.
+    proto method chrs(*%) is pure {*}
+
+    # A helper method for throwing an exception because of a lazy iterator,
+    # to help reduce bytecode size in hot code paths, making it more likely
+    # that the (conditional) caller of this method, can be inlined.
+    method throw-iterator-cannot-be-lazy(
+      str $action, str $what = self.^name
+    ) is hidden-from-backtrace is implementation-detail {
+        X::Cannot::Lazy.new(:$action, :$what).throw
+    }
+
+    # A helper method for creating a failure because of a lazy iterator, to
+    # to help reduce bytecode size in hot code paths, making it more likely
+    # that the (conditional) caller of this method, can be inlined.
+    method fail-iterator-cannot-be-lazy(
+      str $action, str $what = self.^name
+    ) is hidden-from-backtrace is implementation-detail {
+        Failure.new(X::Cannot::Lazy.new(:$action, :$what))
+    }
+
+    # A helper method for throwing an exception because of an array being
+    # empty, to help reduce bytecode size in hot code paths, making it more
+    # likely that the (conditional) caller of this method, can be inlined.
+    method throw-cannot-be-empty(
+      str $action, str $what = self.^name
+    ) is hidden-from-backtrace is implementation-detail {
+        X::Cannot::Empty.new(:$action, :$what).throw
+    }
+
+    # A helper method for creating a failure because of an array being empty
+    # to help reduce bytecode size in hot code paths, making it more likely
+    # that the (conditional) caller of this method, can be inlined.
+    method fail-cannot-be-empty(
+      str $action, str $what = self.^name
+    ) is hidden-from-backtrace is implementation-detail {
+        Failure.new(X::Cannot::Empty.new(:$action, :$what))
+    }
 
     proto method map(|) is nodal {*}
     multi method map(Hash:D \hash) {
@@ -23,7 +67,7 @@ augment class Any {
         X::Cannot::Map.new(
           what       => self.^name,
           using      => "a {iterable.^name}",
-          suggestion => 
+          suggestion =>
 "Did a * (Whatever) get absorbed by a comma, range, series, or list repetition?
 Consider using a block if any of these are necessary for your mapping code."
         ).throw;
@@ -49,13 +93,11 @@ Consider using a block if any of these are necessary for your mapping code."
         has Int $!did-iterate;  # SHOULD BE int, but has Int performs better
 
         method !SET-SELF(\block,\source,\label) {
-            nqp::stmts(
-              (&!block  := block),
-              ($!source := source),
-              ($!label  := nqp::decont(label)),
-              ($!NEXT = block.has-phaser('NEXT')),
-              self
-            )
+            &!block  := block;
+            $!source := source;
+            $!label  := nqp::decont(label);
+            $!NEXT = block.has-phaser('NEXT');
+            self
         }
         method new(\bl,\sou,\la) { nqp::create(self)!SET-SELF(bl,sou,la) }
 
@@ -425,72 +467,70 @@ Consider using a block if any of these are necessary for your mapping code."
         }
 
         method push-all(\target --> IterationEnd) {
-            nqp::stmts(
-              (my $value),
-              nqp::if(
-                $!slipping,
-                nqp::until(
-                  nqp::eqaddr(($value := self.slip-one),IterationEnd),
-                  target.push($value)
-                )
-              ),
+            my $value;
+            nqp::if(
+              $!slipping,
               nqp::until(
-                nqp::eqaddr(($value := $!source.pull-one),IterationEnd),
-                nqp::stmts(
-                  (my int $redo = 1),
-                  nqp::while(
-                    $redo,
-                    nqp::stmts(
-                      ($redo = 0),
-                      nqp::handle(
-                        nqp::if(
-                          nqp::istype((my $result := &!block($value)),Slip),
-                          self.slip-all($result,target),
-                          target.push($result)
-                        ),
-                        'LABELED', $!label,
-                        'REDO', ($redo = 1),
-                        'LAST', return,
-                        'NEXT', nqp::null, # need NEXT for next LABEL support
-                      )
-                    ),
-                    :nohandler
-                  )
+                nqp::eqaddr(($value := self.slip-one),IterationEnd),
+                target.push($value)
+              )
+            );
+
+            nqp::until(
+              nqp::eqaddr(($value := $!source.pull-one),IterationEnd),
+              nqp::stmts(
+                (my int $redo = 1),
+                nqp::while(
+                  $redo,
+                  nqp::stmts(
+                    ($redo = 0),
+                    nqp::handle(
+                      nqp::if(
+                        nqp::istype((my $result := &!block($value)),Slip),
+                        self.slip-all($result,target),
+                        target.push($result)
+                      ),
+                      'LABELED', $!label,
+                      'REDO', ($redo = 1),
+                      'LAST', return,
+                      'NEXT', nqp::null, # need NEXT for next LABEL support
+                    )
+                  ),
+                  :nohandler
                 )
               )
-            )
+            );
         }
 
         method sink-all(--> IterationEnd) {
-            nqp::stmts(
-              nqp::if(
-                $!slipping,
-                nqp::until(
-                  nqp::eqaddr(self.slip-one,IterationEnd),
-                  nqp::null
-                )
-              ),
+            nqp::if(
+              $!slipping,
               nqp::until(
-                nqp::eqaddr((my $value := $!source.pull-one()),IterationEnd),
-                nqp::stmts(
-                  (my int $redo = 1),
-                  nqp::while(
-                    $redo,
-                    nqp::stmts(
-                      ($redo = 0),
-                      nqp::handle(  # doesn't sink
-                        &!block($value),
-                        'LABELED', $!label,
-                        'NEXT', nqp::null,  # need NEXT for next LABEL support
-                        'REDO', ($redo = 1),
-                        'LAST', return
-                      ),
-                    :nohandler
-                    )
+                nqp::eqaddr(self.slip-one,IterationEnd),
+                nqp::null
+              )
+            );
+
+            nqp::until(
+              nqp::eqaddr((my $value := $!source.pull-one()),IterationEnd),
+              nqp::stmts(
+                (my int $redo = 1),
+                nqp::while(
+                  $redo,
+                  nqp::stmts(
+                    ($redo = 0),
+                    nqp::handle(  # doesn't sink
+                      &!block($value),
+                      'LABELED', $!label,
+                      'NEXT', nqp::null,  # need NEXT for next LABEL support
+                      'REDO', ($redo = 1),
+                      'LAST', return
+                    ),
+                  :nohandler
                   )
                 )
               )
-            )
+            );
         }
     }
 
@@ -574,100 +614,98 @@ Consider using a block if any of these are necessary for your mapping code."
         }
 
         method push-all(\target --> IterationEnd) {
-            nqp::stmts(
-              (my $value),
-              nqp::if(
-                $!slipping,
-                nqp::until(
-                  nqp::eqaddr(($value := self.slip-one),IterationEnd),
-                  target.push($value)
-                )
-              ),
+            my $value;
+            nqp::if(
+              $!slipping,
               nqp::until(
-                nqp::eqaddr(($value := $!source.pull-one),IterationEnd),
-                nqp::stmts(
-                  (my int $redo = 1),
-                  nqp::while(
-                    $redo,
-                    nqp::stmts(
-                      ($redo = 0),
-                      nqp::handle(
-                        nqp::if(
-                          nqp::eqaddr(
-                            (my $value2 := $!source.pull-one),
-                            IterationEnd
-                          ),
-                          nqp::stmts(
-                            (my $result := &!block($value)),
-                            nqp::if(
-                              nqp::istype($result,Slip),
-                              self.slip-all($result,target),
-                              target.push($result)
-                            ),
-                            return
-                          ),
+                nqp::eqaddr(($value := self.slip-one),IterationEnd),
+                target.push($value)
+              )
+            );
+
+            nqp::until(
+              nqp::eqaddr(($value := $!source.pull-one),IterationEnd),
+              nqp::stmts(
+                (my int $redo = 1),
+                nqp::while(
+                  $redo,
+                  nqp::stmts(
+                    ($redo = 0),
+                    nqp::handle(
+                      nqp::if(
+                        nqp::eqaddr(
+                          (my $value2 := $!source.pull-one),
+                          IterationEnd
+                        ),
+                        nqp::stmts(
+                          (my $result := &!block($value)),
                           nqp::if(
-                            nqp::istype(
-                              ($result := &!block($value,$value2)),
-                              Slip
-                            ),
+                            nqp::istype($result,Slip),
                             self.slip-all($result,target),
                             target.push($result)
-                          )
+                          ),
+                          return
                         ),
-                        'LABELED', $!label,
-                        'REDO', ($redo = 1),
-                        'LAST', return,
-                        'NEXT', nqp::null, # need NEXT for next LABEL support
-                      )
-                    ),
-                    :nohandler
-                  )
+                        nqp::if(
+                          nqp::istype(
+                            ($result := &!block($value,$value2)),
+                            Slip
+                          ),
+                          self.slip-all($result,target),
+                          target.push($result)
+                        )
+                      ),
+                      'LABELED', $!label,
+                      'REDO', ($redo = 1),
+                      'LAST', return,
+                      'NEXT', nqp::null, # need NEXT for next LABEL support
+                    )
+                  ),
+                  :nohandler
                 )
               )
-            )
+            );
         }
 
         method sink-all(--> IterationEnd) {
-            nqp::stmts(
-              nqp::if(
-                $!slipping,
-                nqp::until(
-                  nqp::eqaddr(self.slip-one,IterationEnd),
-                  nqp::null,
-                )
-              ),
+            nqp::if(
+              $!slipping,
               nqp::until(
-                nqp::eqaddr((my $value := $!source.pull-one()),IterationEnd),
-                nqp::stmts(
-                  (my int $redo = 1),
-                  nqp::while(
-                    $redo,
-                    nqp::stmts(
-                      ($redo = 0),
-                      nqp::handle(  # doesn't sink
-                        nqp::if(
-                          nqp::eqaddr(
-                            (my $value2 := $!source.pull-one),
-                            IterationEnd
-                          ),
-                          nqp::stmts(
-                            (&!block($value)),
-                            return
-                          ),
-                          (&!block($value,$value2))
+                nqp::eqaddr(self.slip-one,IterationEnd),
+                nqp::null,
+              )
+            );
+
+            nqp::until(
+              nqp::eqaddr((my $value := $!source.pull-one()),IterationEnd),
+              nqp::stmts(
+                (my int $redo = 1),
+                nqp::while(
+                  $redo,
+                  nqp::stmts(
+                    ($redo = 0),
+                    nqp::handle(  # doesn't sink
+                      nqp::if(
+                        nqp::eqaddr(
+                          (my $value2 := $!source.pull-one),
+                          IterationEnd
                         ),
-                        'LABELED', $!label,
-                        'NEXT', nqp::null,  # need NEXT for next LABEL support
-                        'REDO', ($redo = 1),
-                        'LAST', return
-                      )
-                    ),
-                  :nohandler
-                  )
+                        nqp::stmts(
+                          (&!block($value)),
+                          return
+                        ),
+                        (&!block($value,$value2))
+                      ),
+                      'LABELED', $!label,
+                      'NEXT', nqp::null,  # need NEXT for next LABEL support
+                      'REDO', ($redo = 1),
+                      'LAST', return
+                    )
+                  ),
+                :nohandler
                 )
               )
-            )
+            );
         }
     }
 
@@ -694,11 +732,10 @@ Consider using a block if any of these are necessary for your mapping code."
         method is-lazy() { $!source.is-lazy }
 
         method pull-one() is raw {
-            nqp::if(
-              nqp::isconcrete($!value-buffer),
-              nqp::setelems($!value-buffer,0),
-              ($!value-buffer := nqp::create(IterationBuffer))
-            );
+            nqp::isconcrete($!value-buffer)
+              ?? nqp::setelems($!value-buffer,0)
+              !! ($!value-buffer := nqp::create(IterationBuffer));
+
             my int $redo = 1;
             my $result;
 
@@ -776,7 +813,7 @@ Consider using a block if any of these are necessary for your mapping code."
     sub sequential-map(\source, &block, \label) {
         # We want map to be fast, so we go to some effort to build special
         # case iterators that can ignore various interesting cases.
-        my $count = &block.count;
+        my $count := &block.count;
 
         Seq.new(
           nqp::istype(&block,Block) && &block.has-phasers
@@ -810,37 +847,34 @@ Consider using a block if any of these are necessary for your mapping code."
         }
         method new(\list,Mu \test) { nqp::create(self)!SET-SELF(list,test) }
         method pull-one() is raw {
-            nqp::stmts(
-              nqp::until(
-                nqp::eqaddr(($_ := $!iter.pull-one),IterationEnd)
-                  || $!test($_),
-                ($!index = nqp::add_i($!index,1))
-              ),
-              nqp::if(
-                nqp::eqaddr($_,IterationEnd),
-                IterationEnd,
-                nqp::p6box_i($!index = nqp::add_i($!index,1))
-              )
-            )
+            nqp::until(
+              nqp::eqaddr(($_ := $!iter.pull-one),IterationEnd)
+                || $!test($_),
+              ($!index = nqp::add_i($!index,1))
+            );
+
+            nqp::eqaddr($_,IterationEnd)
+              ?? IterationEnd
+              !! nqp::p6box_i($!index = nqp::add_i($!index,1))
         }
         method push-all(\target --> IterationEnd) {
-            nqp::stmts(
-              (my $iter := $!iter),  # lexicals faster than attrs
-              (my $test := $!test),
-              (my int $i = $!index),
-              nqp::until(
-                nqp::eqaddr(($_ := $!iter.pull-one),IterationEnd),
-                nqp::stmts(
-                  ($i = nqp::add_i($i,1)),
-                  nqp::if(
-                    $!test($_),
-                    target.push(nqp::p6box_i($i))
-                  )
+            my $iter := $!iter;  # lexicals faster than attrs
+            my $test := $!test;
+            my int $i = $!index;
+
+            nqp::until(
+              nqp::eqaddr(($_ := $!iter.pull-one),IterationEnd),
+              nqp::stmts(
+                ($i = nqp::add_i($i,1)),
+                nqp::if(
+                  $!test($_),
+                  target.push(nqp::p6box_i($i))
                 )
-              ),
-              ($!index = $i)
-            )
+              )
+            );
+            $!index = $i;
         }
+        method is-deterministic(--> Bool:D) { $!iter.is-deterministic }
     }
     method !grep-k(Callable:D $test) { Seq.new(Grep-K.new(self,$test)) }
 
@@ -896,6 +930,7 @@ Consider using a block if any of these are necessary for your mapping code."
               )
             );
         }
+        method is-deterministic(--> Bool:D) { $!iter.is-deterministic }
     }
     method !grep-kv(Callable:D $test) { Seq.new(Grep-KV.new(self,$test)) }
 
@@ -911,37 +946,34 @@ Consider using a block if any of these are necessary for your mapping code."
         }
         method new(\list,Mu \test) { nqp::create(self)!SET-SELF(list,test) }
         method pull-one() is raw {
-            nqp::stmts(
-              nqp::until(
-                nqp::eqaddr(($_ := $!iter.pull-one),IterationEnd)
-                  || $!test($_),
-                ($!index = nqp::add_i($!index,1))
-              ),
-              nqp::if(
-                nqp::eqaddr($_,IterationEnd),
-                IterationEnd,
-                Pair.new(($!index = nqp::add_i($!index,1)),$_)
-              )
-            )
+            nqp::until(
+              nqp::eqaddr(($_ := $!iter.pull-one),IterationEnd)
+                || $!test($_),
+              ($!index = nqp::add_i($!index,1))
+            );
+
+            nqp::eqaddr($_,IterationEnd)
+              ?? IterationEnd
+              !! Pair.new(($!index = nqp::add_i($!index,1)),$_)
         }
         method push-all(\target --> IterationEnd) {
-            nqp::stmts(
-              (my $iter := $!iter),   # lexicals are faster than attrs
-              (my $test := $!test),
-              (my int $i = $!index),
-              nqp::until(
-                nqp::eqaddr(($_ := $iter.pull-one),IterationEnd),
-                nqp::stmts(
-                  ($i = nqp::add_i($i,1)),
-                  nqp::if(
-                    $test($_),
-                    target.push(Pair.new($i,$_))
-                  )
+            my $iter := $!iter;   # lexicals are faster than attrs
+            my $test := $!test;
+            my int $i = $!index;
+
+            nqp::until(
+              nqp::eqaddr(($_ := $iter.pull-one),IterationEnd),
+              nqp::stmts(
+                ($i = nqp::add_i($i,1)),
+                nqp::if(
+                  $test($_),
+                  target.push(Pair.new($i,$_))
                 )
-              ),
-              ($!index = $i)
-            )
+              )
+            );
+            $!index = $i;
         }
+        method is-deterministic(--> Bool:D) { $!iter.is-deterministic }
     }
     method !grep-p(Callable:D $test) { Seq.new(Grep-P.new(self,$test)) }
 
@@ -955,6 +987,7 @@ Consider using a block if any of these are necessary for your mapping code."
         }
         method new(\list,Mu \test) { nqp::create(self)!SET-SELF(list,test) }
         method is-lazy() { $!iter.is-lazy }
+        method is-deterministic(--> Bool:D) { $!iter.is-deterministic }
     }
     method !grep-callable(Callable:D $test) {
         nqp::if(
@@ -1164,41 +1197,36 @@ Consider using a block if any of these are necessary for your mapping code."
     }
     multi method first(Callable:D $test, :$end, *%a is copy) is raw {
         if $end {
-            nqp::stmts(
-              (my $elems = self.elems),
-              nqp::if(
-                ($elems && nqp::not_i($elems == Inf)),
-                nqp::stmts(
-                  (my int $index = $elems),
-                  nqp::while(
-                    nqp::isge_i(($index = nqp::sub_i($index,1)),0),
-                    nqp::if(
-                      $test(self.AT-POS($index)),
-                      return self!first-result(
-                        $index,self.AT-POS($index),'first :end',%a)
-                    )
-                  ),
-                  Nil
+            my $elems = self.elems;
+            nqp::if(
+              ($elems && nqp::not_i($elems == Inf)),
+              nqp::stmts(
+                (my int $index = $elems),
+                nqp::while(
+                  nqp::isge_i(($index = nqp::sub_i($index,1)),0),
+                  nqp::if(
+                    $test(self.AT-POS($index)),
+                    return self!first-result(
+                      $index,self.AT-POS($index),'first :end',%a)
+                  )
                 ),
                 Nil
-              )
+              ),
+              Nil
             )
         }
         else {
-            nqp::stmts(
-              (my $iter := self.iterator),
-              (my int $index),
-              nqp::until(
-                (nqp::eqaddr(($_ := $iter.pull-one),IterationEnd)
-                  || $test($_)),
-                ($index = nqp::add_i($index,1))
-              ),
-              nqp::if(
-                nqp::eqaddr($_,IterationEnd),
-                Nil,
-                self!first-result($index,$_,'first',%a)
-              )
-            )
+            my $iter := self.iterator;
+            my int $index;
+            nqp::until(
+              (nqp::eqaddr(($_ := $iter.pull-one),IterationEnd)
+                || $test($_)),
+              ($index = nqp::add_i($index,1))
+            );
+
+            nqp::eqaddr($_,IterationEnd)
+              ?? Nil
+              !! self!first-result($index,$_,'first',%a)
         }
     }
     multi method first(Mu $test, :$end, *%a) is raw {
@@ -1216,40 +1244,36 @@ Consider using a block if any of these are necessary for your mapping code."
             !! self.head
     }
     method !first-accepts(Mu $test,%a) is raw {
-        nqp::stmts(
-          (my $iter := self.iterator),
-          (my int $index),
-          nqp::until(
-            (nqp::eqaddr(($_ := $iter.pull-one),IterationEnd)
-              || $test.ACCEPTS($_)),
-            ($index = nqp::add_i($index,1))
-          ),
-          nqp::if(
-            nqp::eqaddr($_,IterationEnd),
-            Nil,
-            self!first-result($index,$_,'first',%a)
-          )
-        )
+        my $iter := self.iterator;
+        my int $index;
+
+        nqp::until(
+          (nqp::eqaddr(($_ := $iter.pull-one),IterationEnd)
+            || $test.ACCEPTS($_)),
+          ($index = nqp::add_i($index,1))
+        );
+
+        nqp::eqaddr($_,IterationEnd)
+          ?? Nil
+          !! self!first-result($index,$_,'first',%a)
     }
     method !first-accepts-end(Mu $test,%a) is raw {
-        nqp::stmts(
-          (my $elems = self.elems),
-          nqp::if(
-            ($elems && nqp::not_i($elems == Inf)),
-            nqp::stmts(
-              (my int $index = $elems),
-              nqp::while(
-                nqp::isge_i(($index = nqp::sub_i($index,1)),0),
-                nqp::if(
-                  $test.ACCEPTS(self.AT-POS($index)),
-                  return self!first-result(
-                    $index,self.AT-POS($index),'first :end',%a)
-                )
-              ),
-              Nil
+        my $elems = self.elems;
+        nqp::if(
+          ($elems && nqp::not_i($elems == Inf)),
+          nqp::stmts(
+            (my int $index = $elems),
+            nqp::while(
+              nqp::isge_i(($index = nqp::sub_i($index,1)),0),
+              nqp::if(
+                $test.ACCEPTS(self.AT-POS($index)),
+                return self!first-result(
+                  $index,self.AT-POS($index),'first :end',%a)
+              )
             ),
             Nil
-          )
+          ),
+          Nil
         )
     }
     method !iterator-and-first($action,\first) is raw {
@@ -1273,72 +1297,91 @@ Consider using a block if any of these are necessary for your mapping code."
         )
     }
 
-    proto method min (|) is nodal {*}
-    multi method min() {
-        nqp::stmts(
-          nqp::if(
-            (my $iter := self!iterator-and-first(".min",my $min)),
+    proto method sum(*%) is nodal {*}
+    multi method sum(Any:D:) {
+        nqp::if(
+          (my \iterator := self.iterator).is-lazy,
+          self.fail-iterator-cannot-be-lazy('.sum'),
+          nqp::stmts(
+            (my $sum := 0),
             nqp::until(
-              nqp::eqaddr((my $pulled := $iter.pull-one),IterationEnd),
-              nqp::if(
-                (nqp::isconcrete($pulled) && $pulled cmp $min < 0),
-                $min = $pulled
-              )
-            )
-          ),
-          nqp::if(nqp::defined($min),$min,Inf)
+              nqp::eqaddr((my \pulled := iterator.pull-one),IterationEnd),
+              ($sum := $sum + pulled)
+            ),
+            $sum
+          )
         )
     }
-    multi method min(&by) {
-        nqp::stmts(
-          (my $cmp := nqp::if(
-            nqp::iseq_i(&by.arity,2),&by,{ &by($^a) cmp &by($^b) })),
-          nqp::if(
-            (my $iter := self!iterator-and-first(".min",my $min)),
-            nqp::until(
-              nqp::eqaddr((my $pulled := $iter.pull-one),IterationEnd),
-              nqp::if(
-                (nqp::isconcrete($pulled) && $cmp($pulled,$min) < 0),
-                $min = $pulled
-              )
+
+    proto method min (|) is nodal {*}
+    multi method min() {
+        nqp::if(
+          (my $iter := self!iterator-and-first(".min",my $min)),
+          nqp::until(
+            nqp::eqaddr((my $pulled := $iter.pull-one),IterationEnd),
+            nqp::if(
+              (nqp::isconcrete($pulled) && $pulled cmp $min < 0),
+              $min = $pulled
             )
-          ),
-          nqp::if(nqp::defined($min),$min,Inf)
-        )
+          )
+        );
+
+        nqp::defined($min) ?? $min !! Inf
+    }
+    multi method min(&by) {
+        my $cmp := nqp::if(
+          nqp::iseq_i(&by.arity,2),
+          &by,
+          { &by($^a) cmp &by($^b) }
+        );
+        nqp::if(
+          (my $iter := self!iterator-and-first(".min",my $min)),
+          nqp::until(
+            nqp::eqaddr((my $pulled := $iter.pull-one),IterationEnd),
+            nqp::if(
+              (nqp::isconcrete($pulled) && $cmp($pulled,$min) < 0),
+              $min = $pulled
+            )
+          )
+        );
+
+        nqp::defined($min) ?? $min !! Inf
     }
 
     proto method max (|) is nodal {*}
     multi method max() {
-        nqp::stmts(
-          nqp::if(
-            (my $iter := self!iterator-and-first(".max",my $max)),
-            nqp::until(
-              nqp::eqaddr((my $pulled := $iter.pull-one),IterationEnd),
-              nqp::if(
-                (nqp::isconcrete($pulled) && $pulled cmp $max > 0),
-                $max = $pulled
-              )
+        nqp::if(
+          (my $iter := self!iterator-and-first(".max",my $max)),
+          nqp::until(
+            nqp::eqaddr((my $pulled := $iter.pull-one),IterationEnd),
+            nqp::if(
+              (nqp::isconcrete($pulled) && $pulled cmp $max > 0),
+              $max = $pulled
             )
-          ),
-          nqp::if(nqp::defined($max),$max,-Inf)
-        )
+          )
+        );
+
+        nqp::defined($max) ??  $max !! -Inf
     }
     multi method max(&by) {
-        nqp::stmts(
-          (my $cmp := nqp::if(
-            nqp::iseq_i(&by.arity,2),&by,{ &by($^a) cmp &by($^b) })),
-          nqp::if(
-            (my $iter := self!iterator-and-first(".max",my $max)),
-            nqp::until(
-              nqp::eqaddr((my $pulled := $iter.pull-one),IterationEnd),
-              nqp::if(
-                (nqp::isconcrete($pulled) && $cmp($pulled,$max) > 0),
-                $max = $pulled
-              )
+        my $cmp := nqp::if(
+          nqp::iseq_i(&by.arity,2),
+          &by,
+          { &by($^a) cmp &by($^b) }
+        );
+
+        nqp::if(
+          (my $iter := self!iterator-and-first(".max",my $max)),
+          nqp::until(
+            nqp::eqaddr((my $pulled := $iter.pull-one),IterationEnd),
+            nqp::if(
+              (nqp::isconcrete($pulled) && $cmp($pulled,$max) > 0),
+              $max = $pulled
             )
-          ),
-          nqp::if(nqp::defined($max),$max,-Inf)
-        )
+          )
+        );
+
+        nqp::defined($max) ?? $max !! -Inf
     }
 
     method !minmax-range-init(\value,\mi,\exmi,\ma,\exma --> Nil) {
@@ -1348,183 +1391,167 @@ Consider using a block if any of these are necessary for your mapping code."
         exma = value.excludes-max;
     }
     method !minmax-range-check(\value,\mi,\exmi,\ma,\exma --> Nil) {
-        nqp::stmts(
-          nqp::if(
-            ((value.min cmp mi) < 0),
-            nqp::stmts(
-              (mi   = value.min),
-              (exmi = value.excludes-min)
-            )
-          ),
-          nqp::if(
-            ((value.max cmp ma) > 0),
-            nqp::stmts(
-              (ma   = value.max),
-              (exma = value.excludes-max)
-            )
+        nqp::if(
+          ((value.min cmp mi) < 0),
+          nqp::stmts(
+            (mi   = value.min),
+            (exmi = value.excludes-min)
           )
-        )
+        );
+
+        nqp::if(
+          ((value.max cmp ma) > 0),
+          nqp::stmts(
+            (ma   = value.max),
+            (exma = value.excludes-max)
+          )
+        );
     }
     method !cmp-minmax-range-check(\value,$cmp,\mi,\exmi,\ma,\exma --> Nil) {
-        nqp::stmts(                     # $cmp sigillless confuses the optimizer
-          nqp::if(
-            ($cmp(value.min,mi) < 0),
-            nqp::stmts(
-              (mi   = value.min),
-              (exmi = value.excludes-min)
-            )
-          ),
-          nqp::if(
-            ($cmp(value.max,ma) > 0),
-            nqp::stmts(
-              (ma   = value.max),
-              (exma = value.excludes-max)
-            )
+        nqp::if(                        # $cmp sigillless confuses the optimizer
+          ($cmp(value.min,mi) < 0),
+          nqp::stmts(
+            (mi   = value.min),
+            (exmi = value.excludes-min)
           )
-        )
+        );
+
+        nqp::if(
+          ($cmp(value.max,ma) > 0),
+          nqp::stmts(
+            (ma   = value.max),
+            (exma = value.excludes-max)
+          )
+        );
     }
 
     proto method minmax (|) is nodal {*}
     multi method minmax() {
-        nqp::stmts(
-          nqp::if(
-            (my $iter := self!iterator-and-first(".minmax",my $pulled)),
-            nqp::stmts(
+        nqp::if(
+          (my $iter := self!iterator-and-first(".minmax",my $pulled)),
+          nqp::stmts(
+            nqp::if(
+              nqp::istype($pulled,Range),
+              self!minmax-range-init($pulled,
+                my $min,my int $excludes-min,my $max,my int $excludes-max),
               nqp::if(
-                nqp::istype($pulled,Range),
-                self!minmax-range-init($pulled,
-                  my $min,my int $excludes-min,my $max,my int $excludes-max),
+                nqp::istype($pulled,Positional),
+                self!minmax-range-init($pulled.minmax, # recurse for min/max
+                  $min,$excludes-min,$max,$excludes-max),
+                ($min = $max = $pulled)
+              )
+            ),
+            nqp::until(
+              nqp::eqaddr(($pulled := $iter.pull-one),IterationEnd),
+              nqp::if(
+                nqp::isconcrete($pulled),
                 nqp::if(
-                  nqp::istype($pulled,Positional),
-                  self!minmax-range-init($pulled.minmax, # recurse for min/max
-                    $min,$excludes-min,$max,$excludes-max),
-                  ($min = $max = $pulled)
-                )
-              ),
-              nqp::until(
-                nqp::eqaddr(($pulled := $iter.pull-one),IterationEnd),
-                nqp::if(
-                  nqp::isconcrete($pulled),
+                  nqp::istype($pulled,Range),
+                  self!minmax-range-check($pulled,
+                     $min,$excludes-min,$max,$excludes-max),
                   nqp::if(
-                    nqp::istype($pulled,Range),
-                    self!minmax-range-check($pulled,
+                    nqp::istype($pulled,Positional),
+                    self!minmax-range-check($pulled.minmax,
                        $min,$excludes-min,$max,$excludes-max),
                     nqp::if(
-                      nqp::istype($pulled,Positional),
-                      self!minmax-range-check($pulled.minmax,
-                         $min,$excludes-min,$max,$excludes-max),
+                      (($pulled cmp $min) < 0),
+                      ($min = $pulled),
                       nqp::if(
-                        (($pulled cmp $min) < 0),
-                        ($min = $pulled),
-                        nqp::if(
-                          (($pulled cmp $max) > 0),
-                          ($max = $pulled)
-                        )
+                        (($pulled cmp $max) > 0),
+                        ($max = $pulled)
                       )
                     )
                   )
                 )
               )
             )
-          ),
-          nqp::if(
-            nqp::defined($min),
-            Range.new($min,$max,:$excludes-min,:$excludes-max),
-            Range.new(Inf,-Inf)
           )
-        )
+        );
+
+        nqp::defined($min)
+          ?? Range.new($min,$max,:$excludes-min,:$excludes-max)
+          !! Range.new(Inf,-Inf)
     }
     multi method minmax(&by) {
-        nqp::stmts(
-          nqp::if(
-            (my $iter := self!iterator-and-first(".minmax",my $pulled)),
-            nqp::stmts(
-              (my $cmp = nqp::if(
-                nqp::iseq_i(&by.arity,2),&by,{ &by($^a) cmp &by($^b) })
-              ),
+        nqp::if(
+          (my $iter := self!iterator-and-first(".minmax",my $pulled)),
+          nqp::stmts(
+            (my $cmp = nqp::if(
+              nqp::iseq_i(&by.arity,2),&by,{ &by($^a) cmp &by($^b) })
+            ),
+            nqp::if(
+              nqp::istype($pulled,Range),
+              self!minmax-range-init($pulled,
+                my $min,my int $excludes-min,my $max,my int $excludes-max),
               nqp::if(
-                nqp::istype($pulled,Range),
-                self!minmax-range-init($pulled,
-                  my $min,my int $excludes-min,my $max,my int $excludes-max),
+                nqp::istype($pulled,Positional),
+                self!minmax-range-init($pulled.minmax(&by), # recurse min/max
+                  $min,$excludes-min,$max,$excludes-max),
+                ($min = $max = $pulled)
+              )
+            ),
+            nqp::until(
+              nqp::eqaddr(($pulled := $iter.pull-one),IterationEnd),
+              nqp::if(
+                nqp::isconcrete($pulled),
                 nqp::if(
-                  nqp::istype($pulled,Positional),
-                  self!minmax-range-init($pulled.minmax(&by), # recurse min/max
-                    $min,$excludes-min,$max,$excludes-max),
-                  ($min = $max = $pulled)
-                )
-              ),
-              nqp::until(
-                nqp::eqaddr(($pulled := $iter.pull-one),IterationEnd),
-                nqp::if(
-                  nqp::isconcrete($pulled),
+                  nqp::istype($pulled,Range),
+                  self!cmp-minmax-range-check($pulled,
+                     $cmp,$min,$excludes-min,$max,$excludes-max),
                   nqp::if(
-                    nqp::istype($pulled,Range),
-                    self!cmp-minmax-range-check($pulled,
+                    nqp::istype($pulled,Positional),
+                    self!cmp-minmax-range-check($pulled.minmax(&by),
                        $cmp,$min,$excludes-min,$max,$excludes-max),
                     nqp::if(
-                      nqp::istype($pulled,Positional),
-                      self!cmp-minmax-range-check($pulled.minmax(&by),
-                         $cmp,$min,$excludes-min,$max,$excludes-max),
+                      ($cmp($pulled,$min) < 0),
+                      ($min = $pulled),
                       nqp::if(
-                        ($cmp($pulled,$min) < 0),
-                        ($min = $pulled),
-                        nqp::if(
-                          ($cmp($pulled,$max) > 0),
-                          ($max = $pulled)
-                        )
+                        ($cmp($pulled,$max) > 0),
+                        ($max = $pulled)
                       )
                     )
                   )
                 )
               )
             )
-          ),
-          nqp::if(
-            nqp::defined($min),
-            Range.new($min,$max,:$excludes-min,:$excludes-max),
-            Range.new(Inf,-Inf)
           )
-        )
+        );
+
+        nqp::defined($min)
+          ?? Range.new($min,$max,:$excludes-min,:$excludes-max)
+          !! Range.new(Inf,-Inf)
     }
 
     proto method sort(|) is nodal {*}
     multi method sort() {
-        nqp::if(
+        nqp::eqaddr(
+          self.iterator.push-until-lazy(
+            my \buf := nqp::create(IterationBuffer)),
+          IterationEnd
+        ) ?? Seq.new(
+               Rakudo::Iterator.ReifiedList(
+                 Rakudo::Sorting.MERGESORT-REIFIED-LIST(buf.List)
+               )
+             )
+          !! X::Cannot::Lazy.new(:action<sort>).throw
+    }
+    multi method sort(&by) {
+        nqp::unless(
           nqp::eqaddr(
             self.iterator.push-until-lazy(
               my \buf := nqp::create(IterationBuffer)),
             IterationEnd
           ),
-          Seq.new(
-            Rakudo::Iterator.ReifiedList(
-              Rakudo::Sorting.MERGESORT-REIFIED-LIST(buf.List)
-            )
-          ),
           X::Cannot::Lazy.new(:action<sort>).throw
-        )
-    }
-    multi method sort(&by) {
-        nqp::stmts(
-          nqp::unless(
-            nqp::eqaddr(
-              self.iterator.push-until-lazy(
-                my \buf := nqp::create(IterationBuffer)),
-              IterationEnd
-            ),
-            X::Cannot::Lazy.new(:action<sort>).throw
-          ),
-          Seq.new(
-            Rakudo::Iterator.ReifiedList(
-              nqp::if(
-                nqp::eqaddr(&by,&infix:<cmp>),
-                Rakudo::Sorting.MERGESORT-REIFIED-LIST(buf.List),
-                nqp::if(
-                  &by.count < 2,
-                  Rakudo::Sorting.MERGESORT-REIFIED-LIST-AS(  buf.List,&by),
-                  Rakudo::Sorting.MERGESORT-REIFIED-LIST-WITH(buf.List,&by)
-                )
-              )
-            )
+        );
+
+        Seq.new(
+          Rakudo::Iterator.ReifiedList(
+            nqp::eqaddr(&by,&infix:<cmp>)
+              ?? Rakudo::Sorting.MERGESORT-REIFIED-LIST(buf.List)
+              !! &by.count < 2
+                ?? Rakudo::Sorting.MERGESORT-REIFIED-LIST-AS(  buf.List,&by)
+                !! Rakudo::Sorting.MERGESORT-REIFIED-LIST-WITH(buf.List,&by)
           )
         )
     }
@@ -1533,15 +1560,11 @@ Consider using a block if any of these are necessary for your mapping code."
     multi method collate() { self.sort(&[coll]) }
 
     sub find-reducer-for-op(&op) {
-        nqp::if(
-          nqp::iseq_s(&op.prec("prec"),"f="),
-          &METAOP_REDUCE_LISTINFIX,
-          nqp::if(
-            nqp::iseq_i(nqp::chars(my str $assoc = &op.prec("assoc")),0),
-            &METAOP_REDUCE_LEFT,
-            ::(nqp::concat('&METAOP_REDUCE_',nqp::uc($assoc)))
-          )
-        )
+        nqp::iseq_s(&op.prec("prec"),"f=")
+          ?? &METAOP_REDUCE_LISTINFIX
+          !! nqp::iseq_i(nqp::chars(my str $assoc = &op.prec("assoc")),0)
+            ?? &METAOP_REDUCE_LEFT
+            !! ::(nqp::concat('&METAOP_REDUCE_',nqp::uc($assoc)))
     }
 
     proto method reduce(|) is nodal {*}
@@ -1556,31 +1579,30 @@ Consider using a block if any of these are necessary for your mapping code."
         (find-reducer-for-op(&with))(&with,1)(self)
     }
 
+    proto method slice(|) is nodal { * }
+    multi method slice(Any:D: *@indices --> Seq:D) { self.Seq.slice(@indices) }
+
     proto method unique(|) is nodal {*}
 
     my class Unique does Iterator {
         has $!iter;
         has $!seen;
         method !SET-SELF(\list) {
-            nqp::stmts(
-              ($!iter := list.iterator),
-              ($!seen := nqp::hash),
-              self
-            )
+            $!iter := list.iterator;
+            $!seen := nqp::hash;
+            self
         }
         method new(\list) { nqp::create(self)!SET-SELF(list) }
         method pull-one() is raw {
-            nqp::stmts(
-              nqp::until(
-                nqp::eqaddr((my \pulled := $!iter.pull-one),IterationEnd)
-                  || (nqp::not_i(nqp::existskey(
-                    $!seen,
-                    (my \needle := pulled.WHICH)
-                  )) && nqp::bindkey($!seen,needle,1)),
-                nqp::null
-              ),
-              pulled
-            )
+            nqp::until(
+              nqp::eqaddr((my \pulled := $!iter.pull-one),IterationEnd)
+                || (nqp::not_i(nqp::existskey(
+                  $!seen,
+                  (my \needle := pulled.WHICH)
+                )) && nqp::bindkey($!seen,needle,1)),
+              nqp::null
+            );
+            pulled
         }
         method push-all(\target --> IterationEnd) {
             nqp::until(
@@ -1595,18 +1617,17 @@ Consider using a block if any of these are necessary for your mapping code."
             )
         }
         method is-lazy() { $!iter.is-lazy }
+        method is-deterministic(--> Bool:D) { $!iter.is-deterministic }
         method sink-all(--> IterationEnd) { $!iter.sink-all }
     }
     multi method unique() { Seq.new(Unique.new(self)) }
 
     multi method unique( :&as!, :&with! ) {
-        nqp::if(
-          nqp::eqaddr(&with,&[===]), # use optimized version
-          self.unique(:&as),
-          Seq.new(
-            Rakudo::Iterator.UniqueRepeatedAsWith(self.iterator,&as,&with,1)
-          )
-        )
+        nqp::eqaddr(&with,&[===]) # use optimized version
+          ?? self.unique(:&as)
+          !! Seq.new(
+               Rakudo::Iterator.UniqueRepeatedAsWith(self.iterator,&as,&with,1)
+             )
     }
 
     my class Unique-As does Iterator {
@@ -1620,19 +1641,17 @@ Consider using a block if any of these are necessary for your mapping code."
         }
         method new(\list, &as) { nqp::create(self)!SET-SELF(list, &as) }
         method pull-one() is raw {
-            nqp::stmts(
-              nqp::until(
-                nqp::eqaddr((my \value := $!iter.pull-one),IterationEnd),
-                nqp::unless(
-                  nqp::existskey($!seen,my \needle := &!as(value).WHICH),
-                  nqp::stmts(
-                    nqp::bindkey($!seen,needle,1),
-                    return-rw value
-                  )
+            nqp::until(
+              nqp::eqaddr((my \value := $!iter.pull-one),IterationEnd),
+              nqp::unless(
+                nqp::existskey($!seen,my \needle := &!as(value).WHICH),
+                nqp::stmts(
+                  nqp::bindkey($!seen,needle,1),
+                  return-rw value
                 )
-              ),
-              IterationEnd
-            )
+              )
+            );
+            IterationEnd
         }
         method push-all(\target --> IterationEnd) {
             nqp::until(
@@ -1646,15 +1665,14 @@ Consider using a block if any of these are necessary for your mapping code."
               )
             )
         }
+        method is-deterministic(--> Bool:D) { $!iter.is-deterministic }
     }
     multi method unique( :&as! ) { Seq.new(Unique-As.new(self,&as)) }
 
     multi method unique( :&with! ) {
-        nqp::if(
-          nqp::eqaddr(&with,&[===]), # use optimized version
-          self.unique,
-          Seq.new(Rakudo::Iterator.UniqueRepeatedWith(self.iterator,&with,1))
-        )
+        nqp::eqaddr(&with,&[===]) # use optimized version
+          ?? self.unique
+          !! Seq.new(Rakudo::Iterator.UniqueRepeatedWith(self.iterator,&with,1))
     }
 
     proto method repeated(|) is nodal {*}
@@ -1690,17 +1708,16 @@ Consider using a block if any of these are necessary for your mapping code."
             );
         }
         method is-lazy() { $!iter.is-lazy }
+        method is-deterministic(--> Bool:D) { $!iter.is-deterministic }
     }
     multi method repeated() { Seq.new(Repeated.new(self)) }
 
     multi method repeated( :&as!, :&with! ) {
-        nqp::if(
-          nqp::eqaddr(&with,&[===]), # use optimized version
-          self.repeated(:&as),
-          Seq.new(
-            Rakudo::Iterator.UniqueRepeatedAsWith(self.iterator,&as,&with,0)
-          )
-        )
+        nqp::eqaddr(&with,&[===]) # use optimized version
+          ?? self.repeated(:&as)
+          !! Seq.new(
+               Rakudo::Iterator.UniqueRepeatedAsWith(self.iterator,&as,&with,0)
+             )
     }
 
     class Repeated-As does Iterator {
@@ -1735,15 +1752,14 @@ Consider using a block if any of these are necessary for your mapping code."
             );
         }
         method is-lazy() { $!iter.is-lazy }
+        method is-deterministic(--> Bool:D) { $!iter.is-deterministic }
     }
     multi method repeated( :&as! ) { Seq.new(Repeated-As.new(self,&as)) }
 
     multi method repeated( :&with! ) {
-        nqp::if(
-          nqp::eqaddr(&with,&[===]), # use optimized version
-          self.repeated,
-          Seq.new(Rakudo::Iterator.UniqueRepeatedWith(self.iterator,&with,0))
-        )
+        nqp::eqaddr(&with,&[===]) # use optimized version
+          ?? self.repeated
+          !! Seq.new(Rakudo::Iterator.UniqueRepeatedWith(self.iterator,&with,0))
     }
 
     proto method squish(|) is nodal {*}
@@ -1815,6 +1831,7 @@ Consider using a block if any of these are necessary for your mapping code."
             }
         }
         method is-lazy() { $!iter.is-lazy }
+        method is-deterministic(--> Bool:D) { $!iter.is-deterministic }
     }
     multi method squish( :&as!, :&with = &[===] ) {
         Seq.new(Squish-As.new(self.iterator, &as, &with))
@@ -1883,6 +1900,7 @@ Consider using a block if any of these are necessary for your mapping code."
             }
         }
         method is-lazy() { $!iter.is-lazy }
+        method is-deterministic(--> Bool:D) { $!iter.is-deterministic }
     }
     multi method squish( :&with = &[===] ) {
         Seq.new(Squish-With.new(self.iterator,&with))
@@ -1919,9 +1937,10 @@ Consider using a block if any of these are necessary for your mapping code."
 
     proto method toggle(|) {*}
     multi method toggle(Any:D: Callable:D \condition, :$off!) {
-        Seq.new( $off
-          ?? Rakudo::Iterator.Until(self.iterator, condition)
-          !! Rakudo::Iterator.While(self.iterator, condition)
+        Seq.new(
+          $off
+            ?? Rakudo::Iterator.Until(self.iterator, condition)
+            !! Rakudo::Iterator.While(self.iterator, condition)
         )
     }
     multi method toggle(Any:D: Callable:D \condition) {
@@ -1934,12 +1953,11 @@ Consider using a block if any of these are necessary for your mapping code."
     }
 
     proto method head(|) {*}
+    multi method head(Any:U: |c) { (self,).head(|c) }
     multi method head(Any:D:) is raw {
-        nqp::if(
-          nqp::eqaddr((my $pulled := self.iterator.pull-one),IterationEnd),
-          Nil,
-          $pulled
-        )
+        nqp::eqaddr((my $pulled := self.iterator.pull-one),IterationEnd)
+          ?? Nil
+          !! $pulled
     }
     multi method head(Any:D: Callable:D $w) {
         Seq.new(
@@ -1951,17 +1969,15 @@ Consider using a block if any of these are necessary for your mapping code."
     }
 
     proto method tail(|) {*}
-    multi method tail() is raw {
-        nqp::if(
-          nqp::eqaddr((my $pulled :=
-            Rakudo::Iterator.LastValue(self.iterator,'tail')),
-            IterationEnd
-          ),
-          Nil,
-          $pulled
-        )
+    multi method tail(Any:U: |c) { (self,).tail(|c) }
+    multi method tail(Any:D:) is raw {
+        nqp::eqaddr((my $pulled :=
+          Rakudo::Iterator.LastValue(self.iterator,'tail')),
+          IterationEnd
+        ) ?? Nil
+          !! $pulled
     }
-    multi method tail($n) {
+    multi method tail(Any:D: $n) {
         Seq.new(
           nqp::if(
             nqp::istype($n,Callable),
@@ -1986,11 +2002,9 @@ Consider using a block if any of these are necessary for your mapping code."
     }
     multi method skip(Whatever) { Seq.new(Rakudo::Iterator.Empty) }
     multi method skip(Callable:D $w) {
-       nqp::if(
-         nqp::isgt_i((my $tail := -($w(0).Int)),0),
-         self.tail($tail),
-         Seq.new(Rakudo::Iterator.Empty)
-       )
+       nqp::isgt_i((my $tail := -($w(0).Int)),0)
+         ?? self.tail($tail)
+         !! Seq.new(Rakudo::Iterator.Empty)
     }
     multi method skip(Int() $n) {
         my $iter := self.iterator;
@@ -2087,6 +2101,140 @@ Consider using a block if any of these are necessary for your mapping code."
     multi method rotor(Any:D: +@cycle, :$partial) {
         Seq.new(Rakudo::Iterator.Rotor(self.iterator,@cycle,$partial))
     }
+
+    proto method nodemap(|) is nodal {*}
+    multi method nodemap(Associative:D: &op) {
+        self.new.STORE: self.keys, self.values.nodemap(&op), :INITIALIZE
+    }
+    multi method nodemap(&op) {
+        my \iterator := self.iterator;
+        return Failure.new(X::Cannot::Lazy.new(:action<nodemap>))
+          if iterator.is-lazy;
+
+        my \buffer   := nqp::create(IterationBuffer);
+        my $value    := iterator.pull-one;
+
+        nqp::until(
+          nqp::eqaddr($value,IterationEnd),
+          nqp::stmts(
+            (my int $redo = 1),
+            nqp::while(
+              $redo,
+              nqp::stmts(
+                $redo = 0,
+                nqp::handle(
+                  nqp::push(buffer,op($value)),
+                  'NEXT', nqp::null,
+                  'REDO', ($redo = 1),
+                  'LAST', ($value := IterationEnd),
+                ) 
+              ),
+              :nohandler
+            ),
+            ($value := iterator.pull-one)
+          ) 
+        );
+        buffer.List
+    }   
+
+    proto method deepmap(|) is nodal {*}
+    multi method deepmap(Associative:D: &op) {
+        self.new.STORE: self.keys, self.values.deepmap(&op), :INITIALIZE
+    }
+    multi method deepmap(&op) {
+        my \iterator := self.iterator;
+        my \buffer   := nqp::create(IterationBuffer);
+        my $value    := iterator.pull-one;
+
+        sub deep(\value) is raw { my $ = value.deepmap(&op) }
+
+        nqp::until(
+          nqp::eqaddr($value,IterationEnd),
+          nqp::stmts(
+            (my int $redo = 1),
+            nqp::while(
+              $redo,
+              nqp::stmts(
+                $redo = 0,
+                nqp::handle(
+                  nqp::stmts(
+                    (my $result := nqp::if(
+                      nqp::istype($value,Iterable) && $value.DEFINITE,
+                      deep($value),
+                      op($value)
+                    )),
+                    nqp::if(
+                      nqp::istype($result,Slip),
+                      $result.iterator.push-all(buffer),
+                      nqp::push(buffer,$result)
+                    ),
+                  ),
+                  'NEXT', nqp::null,
+                  'REDO', ($redo = 1),
+                  'LAST', ($value := IterationEnd),
+                ) 
+              ),
+              :nohandler
+            ),
+            ($value := iterator.pull-one)
+          ) 
+        );
+        nqp::p6bindattrinvres(
+          nqp::if(nqp::istype(self,List),self,List).new, # keep subtypes of List
+          List,'$!reified',buffer
+        ) 
+    }   
+
+    proto method duckmap(|) is nodal {*}
+    multi method duckmap(Associative:D: &op) {
+        self.new.STORE: self.keys, self.values.duckmap(&op)
+    }
+    multi method duckmap(&op) {
+        my \iterator := self.iterator;
+        my \buffer   := nqp::create(IterationBuffer);
+        my $value    := iterator.pull-one;
+
+        sub duck(\arg) is raw {
+            CATCH {
+                return nqp::istype(arg,Iterable:D)
+                  ?? (my $ = arg.duckmap(&op))
+                  !! arg
+            }
+            op(arg)
+        }
+
+        nqp::until(
+          nqp::eqaddr($value,IterationEnd),
+          nqp::stmts(
+            (my int $redo = 1),
+            nqp::while(
+              $redo,
+              nqp::stmts(
+                $redo = 0,
+                nqp::handle(
+                  nqp::stmts(
+                    (my $result := duck($value)),
+                    nqp::if(
+                      nqp::istype($result,Slip),
+                      $result.iterator.push-all(buffer),
+                      nqp::push(buffer,$result)
+                    ),
+                  ),
+                  'NEXT', nqp::null,
+                  'REDO', ($redo = 1),
+                  'LAST', ($value := IterationEnd),
+                ) 
+              ),
+              :nohandler
+            ),
+            ($value := iterator.pull-one)
+          ) 
+        );
+        nqp::p6bindattrinvres(
+          nqp::if(nqp::istype(self,List),self,List).new, # keep subtypes of List
+          List,'$!reified',buffer
+        ) 
+    }   
 }
 
 BEGIN Attribute.^compose;
@@ -2095,10 +2243,18 @@ proto sub infix:<min>(|) is pure {*}
 multi sub infix:<min>(Mu:D \a, Mu:U) { a }
 multi sub infix:<min>(Mu:U, Mu:D \b) { b }
 multi sub infix:<min>(Mu:D \a, Mu:D \b) { (a cmp b) < 0 ?? a !! b }
-multi sub infix:<min>(Int:D \a, Int:D \b) { nqp::if(nqp::islt_i(nqp::cmp_I(nqp::decont(a), nqp::decont(b)), 0), a, b) }
-multi sub infix:<min>(int   \a, int   \b) { nqp::if(nqp::islt_i(nqp::cmp_i(a, b), 0), a, b) }
-multi sub infix:<min>(Num:D \a, Num:D \b) { nqp::if(nqp::islt_i(nqp::cmp_n(a, b), 0), a, b) }
-multi sub infix:<min>(num   \a, num   \b) { nqp::if(nqp::islt_i(nqp::cmp_n(a, b), 0), a, b) }
+multi sub infix:<min>(Int:D \a, Int:D \b) {
+    nqp::islt_i(nqp::cmp_I(nqp::decont(a), nqp::decont(b)), 0) ?? a !! b
+}
+multi sub infix:<min>(int   \a, int   \b) {
+    nqp::islt_i(nqp::cmp_i(a, b), 0) ?? a !! b
+}
+multi sub infix:<min>(Num:D \a, Num:D \b) {
+    nqp::islt_i(nqp::cmp_n(a, b), 0) ?? a !! b
+}
+multi sub infix:<min>(num   \a, num   \b) {
+    nqp::islt_i(nqp::cmp_n(a, b), 0) ?? a !! b
+}
 multi sub infix:<min>(+args is raw) { args.min }
 
 proto sub min(|) is pure {*}
@@ -2109,10 +2265,18 @@ proto sub infix:<max>(|) is pure {*}
 multi sub infix:<max>(Mu:D \a, Mu:U) { a }
 multi sub infix:<max>(Mu:U, Mu:D \b) { b }
 multi sub infix:<max>(Mu:D \a, Mu:D \b) { (a cmp b) > 0 ?? a !! b }
-multi sub infix:<max>(Int:D \a, Int:D \b) { nqp::if(nqp::isgt_i(nqp::cmp_I(nqp::decont(a), nqp::decont(b)), 0), a, b) }
-multi sub infix:<max>(int   \a, int   \b) { nqp::if(nqp::isgt_i(nqp::cmp_i(a, b), 0), a, b) }
-multi sub infix:<max>(Num:D \a, Num:D \b) { nqp::if(nqp::isgt_i(nqp::cmp_n(a, b), 0), a, b) }
-multi sub infix:<max>(num   \a, num   \b) { nqp::if(nqp::isgt_i(nqp::cmp_n(a, b), 0), a, b) }
+multi sub infix:<max>(Int:D \a, Int:D \b) {
+    nqp::isgt_i(nqp::cmp_I(nqp::decont(a), nqp::decont(b)), 0) ?? a !! b
+}
+multi sub infix:<max>(int   \a, int   \b) {
+    nqp::isgt_i(nqp::cmp_i(a, b), 0) ?? a !! b
+}
+multi sub infix:<max>(Num:D \a, Num:D \b) {
+    nqp::isgt_i(nqp::cmp_n(a, b), 0) ?? a !! b
+}
+multi sub infix:<max>(num   \a, num   \b) {
+    nqp::isgt_i(nqp::cmp_n(a, b), 0) ?? a !! b
+}
 multi sub infix:<max>(+args) { args.max }
 
 proto sub max(|) is pure {*}
@@ -2164,4 +2328,13 @@ multi sub sort(&by, +values) { values.sort(&by) }
 multi sub sort(@values)      { @values.sort }
 multi sub sort(+values)      { values.sort }
 
-# vim: ft=perl6 expandtab sw=4
+proto sub nodemap($, $, *%) {*}
+multi sub nodemap(&op, \obj) { obj.nodemap(&op) }
+
+proto sub deepmap($, $, *%) {*}
+multi sub deepmap(&op, \obj) { obj.deepmap(&op) }
+
+proto sub duckmap($, $, *%) {*}
+multi sub duckmap(&op, \obj) { obj.duckmap(&op) }
+
+# vim: expandtab shiftwidth=4

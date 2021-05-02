@@ -1,6 +1,5 @@
 # Proc is a wrapper around Proc::Async, providing a synchronous API atop of
 # the asynchronous API.
-my class Proc::Async { ... }
 my class Proc {
     has IO::Pipe $.in;
     has IO::Pipe $.out;
@@ -165,9 +164,9 @@ my class Proc {
           if nqp::istype($!exitcode,Nil);
     }
 
-    method spawn(*@args where .so, :$cwd = $*CWD, :$env --> Bool:D) {
+    method spawn(*@args where .so, :$cwd = $*CWD, :$env, :$arg0, :$win-verbatim-args = False --> Bool:D) {
         @!command := @args.List;
-        self!spawn-internal(@args, $cwd, $env)
+        self!spawn-internal(@args, $cwd, $env, :$arg0, :$win-verbatim-args)
     }
 
     method shell($cmd, :$cwd = $*CWD, :$env --> Bool:D) {
@@ -175,12 +174,12 @@ my class Proc {
         my @args := Rakudo::Internals.IS-WIN
             ?? (%*ENV<ComSpec>, '/c', $cmd)
             !! ('/bin/sh', '-c', $cmd);
-        self!spawn-internal(@args, $cwd, $env)
+        self!spawn-internal(@args, $cwd, $env, :win-verbatim-args)
     }
 
-    method !spawn-internal(@args, $cwd, $env --> Bool:D) {
+    method !spawn-internal(@args, $cwd, $env, :$arg0, :$win-verbatim-args --> Bool:D) {
         my %ENV := $env ?? $env.hash !! %*ENV;
-        $!proc := Proc::Async.new(|@args, :$!w);
+        $!proc := Proc::Async.new(|@args, :$!w, :$arg0, :$win-verbatim-args);
         .() for @!pre-spawn;
         $!finished = $!proc.start(:$cwd, :%ENV, scheduler => $PROCESS::SCHEDULER);
         my $is-spawned := do {
@@ -240,9 +239,9 @@ my class Proc {
 proto sub run(|) {*}
 multi sub run(*@args where .so, :$in = '-', :$out = '-', :$err = '-',
         Bool :$bin, Bool :$chomp = True, Bool :$merge,
-        Str  :$enc, Str:D :$nl = "\n", :$cwd = $*CWD, :$env) {
+        Str  :$enc, Str:D :$nl = "\n", :$cwd = $*CWD, :$env, :$arg0, :$win-verbatim-args = False) {
     my $proc := Proc.new(:$in, :$out, :$err, :$bin, :$chomp, :$merge, :$enc, :$nl);
-    $proc.spawn(@args, :$cwd, :$env);
+    $proc.spawn(@args, :$cwd, :$env, :$arg0, :$win-verbatim-args);
     $proc
 }
 
@@ -261,4 +260,4 @@ sub QX($cmd, :$cwd = $*CWD, :$env) is implementation-detail {
     $proc.out.slurp(:close) // Failure.new("Unable to read from '$cmd'")
 }
 
-# vim: ft=perl6 expandtab sw=4
+# vim: expandtab shiftwidth=4

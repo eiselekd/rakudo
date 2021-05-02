@@ -143,8 +143,8 @@ role Perl6::Metamodel::C3MRO {
         }
 
         # Otherwise, remove what was accepted from the merge lists.
-        my $i := 0;
-        while $i < nqp::elems(@merge_list) {
+        my int $i := -1;
+        while ++$i < nqp::elems(@merge_list) {
             my @new_list;
             for @merge_list[$i] {
                 unless nqp::decont($_) =:= nqp::decont($accepted) {
@@ -152,7 +152,6 @@ role Perl6::Metamodel::C3MRO {
                 }
             }
             @merge_list[$i] := @new_list;
-            $i := $i + 1;
         }
 
         # Need to merge what remains of the list, then put what was accepted on
@@ -183,3 +182,5 @@ role Perl6::Metamodel::C3MRO {
         %!mro
     }
 }
+
+# vim: expandtab sw=4
